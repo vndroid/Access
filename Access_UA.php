@@ -259,6 +259,10 @@ class Access_UA {
 				$this->browserID = '360';
 				$this->browserName = '360浏览器';
 				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#MQQBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				$this->browserID = 'QQBrowser';
+				$this->browserName = 'QQ浏览器';
+				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#UCWEB([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = $this->browserName = 'UCWEB';
 				$this->browserVersion = $matches[1];
@@ -291,10 +295,6 @@ class Access_UA {
 				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#Opera.([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = $this->browserName = 'Opera';
-				$this->browserVersion = $matches[1];
-			} elseif (preg_match('#TencentTraveler ([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-				$this->browserID = 'TencentTraveler';
-				$this->browserName = '腾讯TT浏览器';
 				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#QQ/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = 'QQ';
