@@ -269,7 +269,7 @@ class Access_UA {
 			} elseif (preg_match('#Quark/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = 'Quark';
 				$this->browserName = 'Quark';
-                                $this->browserVersion = $matches[1];
+                $this->browserVersion = $matches[1];
 			} elseif (preg_match('#Maxthon( |\/)([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = $this->browserName = 'Maxthon';
 				$this->browserVersion = $matches[2];
