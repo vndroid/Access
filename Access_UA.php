@@ -263,6 +263,10 @@ class Access_UA {
 				$this->browserID = 'QQBrowser';
 				$this->browserName = 'QQ浏览器';
 				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#Qiyu/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				$this->browserID = 'Qiyu';
+				$this->browserName = '旗鱼浏览器';
+				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#UCWEB([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = $this->browserName = 'UCWEB';
 				$this->browserVersion = $matches[1];
