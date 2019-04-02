@@ -5,8 +5,8 @@ require_once __DIR__ . '/Access_Bootstrap.php';
  *
  * @package Access
  * @author Kokororin
- * @version 2.0.2
- * @link https://kotori.love
+ * @version 2.0.3
+ * @link https://github.com/Vndroid/Access
  */
 class Access_Plugin implements Typecho_Plugin_Interface
 {
