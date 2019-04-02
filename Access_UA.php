@@ -5,11 +5,14 @@ if (!defined('__ACCESS_PLUGIN_ROOT__')) {
 
 class Access_UA {
 	private static $robots = array(
-		'DuckDuckBot', // DuckDuckGo
-		'gce-spider',  // 谷歌GCE 
-		'YisouSpider', // 宜搜
-		'YandexBot',   // Yandex
-		'UptimeRobot', // Uptime在线率检测
+		'DuckDuckBot',              // DuckDuckGo
+		'DuckDuckGo-Favicons-Bot',  // DuckDuckGo Favicons
+		'gce-spider',               // Google
+		'YisouSpider',              // 宜搜
+		'YandexBot',                // Yandex
+		'UptimeRobot',              // Uptimerobot
+		'Blackboard Safeassign',    // BlackBoard
+		'Nimbostratus-Bot',
 		'TencentTraveler',
 		'Baiduspider',
 		'BaiduGame',
