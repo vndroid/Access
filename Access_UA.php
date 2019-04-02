@@ -259,6 +259,10 @@ class Access_UA {
 				$this->browserID = '360';
 				$this->browserName = '360浏览器';
 				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#OPR/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				$this->browserID = 'Opera';
+				$this->browserName = 'Opera';
+                $this->browserVersion = $matches[1];
 			} elseif (preg_match('#MQQBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = 'QQBrowser';
 				$this->browserName = 'QQ浏览器';
@@ -296,13 +300,6 @@ class Access_UA {
 				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#Safari/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = $this->browserName = 'Safari';
-				$this->browserVersion = $matches[1];
-			} elseif (preg_match('#opera mini#i', $this->ua)) {
-				preg_match('#Opera/([a-zA-Z0-9.]+)#i', $this->ua, $matches);
-				$this->browserID = $this->browserName = 'Opera Mini';
-				$this->browserVersion = $matches[1];
-			} elseif (preg_match('#Opera.([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-				$this->browserID = $this->browserName = 'Opera';
 				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#QQ/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = 'QQ';
