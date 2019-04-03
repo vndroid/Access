@@ -45,7 +45,7 @@ $access = new Access_Core();
                             <input type="hidden" value="<?php echo $request->get('page'); ?>" name="page" />
                             <?php endif; ?>
                             <select name="filter">
-                                <option <?php if($request->filter == 'all'): ?> selected="true"<?php endif; ?>value="all"><?php _e('所有'); ?></option>
+                                <option <?php if($request->filter == 'all'): ?> selected="true"<?php endif; ?>value="all"><?php _e('全部条件'); ?></option>
                                 <option <?php if($request->filter == 'ip'): ?> selected="true"<?php endif; ?>value="ip"><?php _e('按IP'); ?></option>
                                 <option <?php if($request->filter == 'post'): ?> selected="true"<?php endif; ?>value="post"><?php _e('按文章'); ?></option>
                                 <option <?php if($request->filter == 'path'): ?> selected="true"<?php endif; ?>value="path"><?php _e('按路由'); ?></option>
@@ -58,8 +58,8 @@ $access = new Access_Core();
                             </select>
                             <input style="<?php if($request->get('filter', 'all') != 'path'): ?>display: none<?php endif; ?>" type="text" class="text-s" placeholder="" value="<?php echo htmlspecialchars($request->path); ?>" name="path" />
                             <select name="type">
-                                <option <?php if($request->type == 1): ?> selected="true"<?php endif; ?>value="1"><?php _e('默认(仅人类)'); ?></option>
-                                <option <?php if($request->type == 2): ?> selected="true"<?php endif; ?>value="2"><?php _e('仅爬虫'); ?></option>
+                                <option <?php if($request->type == 1): ?> selected="true"<?php endif; ?>value="1"><?php _e('默认（仅人类）'); ?></option>
+                                <option <?php if($request->type == 2): ?> selected="true"<?php endif; ?>value="2"><?php _e('筛选（仅爬虫）'); ?></option>
                                 <option <?php if($request->type == 3): ?> selected="true"<?php endif; ?>value="3"><?php _e('所有'); ?></option>
                             </select>
                                 <input type="hidden" name="page" value="1">
@@ -265,7 +265,7 @@ $(document).ready(function() {
     });
 
     $('a[data-action="ip"]').click(function() {
-        swal('IP查询中...', '正在查询...', 'info');
+        swal('IP 查询中...', '正在查询...', 'info');
         $.ajax({
             url: '<?php echo rtrim(Helper::options()->index, '/').'/access/ip.json';?>',
             method: 'get',
@@ -273,13 +273,13 @@ $(document).ready(function() {
             data: {ip: $(this).data('ip')},
             success: function(data) {
                 if (data.code == 0) {
-                    swal('IP查询成功', data.data, 'success');
+                    swal('IP 查询成功', data.data, 'success');
                 } else {
-                    swal('IP查询失败', data.data, 'warning');
+                    swal('IP 查询失败', data.data, 'warning');
                 }
             },
             error: function() {
-                swal('IP查询失败', '网络异常或PHP环境配置异常', 'warning');
+                swal('IP查询失败', '网络异常或 PHP 环境配置异常', 'warning');
             }
         });
         return false;
@@ -356,7 +356,7 @@ $(document).ready(function() {
         var ipRegex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
 
         if ($filterSelect.val() == 'ip' && !ipRegex.test($ipInput.val())) {
-            return swal('筛选条件错误', 'IP地址不合法', 'warning');
+            return swal('筛选条件错误', 'IP 地址不合法', 'warning');
         }
 
         $form.submit();

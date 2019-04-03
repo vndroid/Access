@@ -22,7 +22,7 @@ class Access_Autoloader
         if (function_exists('spl_autoload_register')) {
             spl_autoload_register(array('Access_Autoloader', 'autoloader'));
         } else {
-            throw new Typecho_Plugin_Exception(_t('php版本过低，最低要求>=5.3.0'));
+            throw new Typecho_Plugin_Exception(_t('PHP 版本过低，最低要求不小于 5.3.0'));
         }
     }
 }
