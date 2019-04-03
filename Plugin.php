@@ -5,7 +5,7 @@ require_once __DIR__ . '/Access_Bootstrap.php';
  *
  * @package Access
  * @author Kokororin
- * @version 2.0.3
+ * @version 2.0.4
  * @link https://github.com/Vndroid/Access
  */
 class Access_Plugin implements Typecho_Plugin_Interface
@@ -63,7 +63,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
     public static function config(Typecho_Widget_Helper_Form $form)
     {
         $pageSize = new Typecho_Widget_Helper_Form_Element_Text(
-            'pageSize', null, '10',
+            'pageSize', null, '50',
             '分页数量', '每页显示的日志数量');
         $isDrop = new Typecho_Widget_Helper_Form_Element_Radio(
             'isDrop', array(
@@ -74,7 +74,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
             'writeType', array(
                 '0' => '后端',
                 '1' => '前端',
-            ), '0', '日志写入类型:', '请选择日志写入类型，如果写入速度较慢可选择前端写入日志。<br/>如果您使用了pjax，请在pjax相关事件中调用 window.Access.track() 方法。');
+            ), '0', '日志写入类型:', '请选择日志写入类型，如果写入速度较慢可选择前端写入日志。<br/>如果您使用了 pjax，请在 pjax 相关事件中调用 window.Access.track() 方法。');
         $form->addInput($pageSize);
         $form->addInput($isDrop);
         $form->addInput($writeType);
@@ -185,7 +185,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
                 throw new Typecho_Plugin_Exception($e->getMessage());
             }
         } else {
-            throw new Typecho_Plugin_Exception(_t('你的适配器为%s，目前只支持MySQL和SQLite', $adapterName));
+            throw new Typecho_Plugin_Exception(_t('你的适配器为%s，目前只支持 MySQL 和 SQLite', $adapterName));
         }
     }
 
