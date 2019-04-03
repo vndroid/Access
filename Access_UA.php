@@ -62,16 +62,16 @@ class Access_UA {
 	private $ua;
 	private $ual;
 	
-	private $osID	  = null;
+	private $osID = null;
 	private $osName	= null;
 	private $osVersion = null;
 	
-	private $robotID	  = null;
-	private $robotName	= null;
+	private $robotID = null;
+	private $robotName = null;
 	private $robotVersion = null;
 	
-	private $browserID	  = null;
-	private $browserName	= null;
+	private $browserID = null;
+	private $browserName = null;
 	private $browserVersion = null;
 
 	function __construct($ua) {
@@ -295,6 +295,10 @@ class Access_UA {
 			} elseif (preg_match('#Edge/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = $this->browserName = 'Edge';
 				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#Edg/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				$this->browserID = 'Edge';
+				$this->browserName = 'Edge';
+                $this->browserVersion = $matches[1];
 			} elseif (preg_match('#XiaoMi/MiuiBrowser/([0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = $this->browserName = '小米浏览器';
 				$this->browserVersion = $matches[1];
