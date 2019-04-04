@@ -5,7 +5,7 @@ require_once __DIR__ . '/Access_Bootstrap.php';
  *
  * @package Access
  * @author Kokororin
- * @version 2.0.4
+ * @version 2.0.5
  * @link https://github.com/Vndroid/Access
  */
 class Access_Plugin implements Typecho_Plugin_Interface
@@ -63,7 +63,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
     public static function config(Typecho_Widget_Helper_Form $form)
     {
         $pageSize = new Typecho_Widget_Helper_Form_Element_Text(
-            'pageSize', null, '50',
+            'pageSize', null, '10',
             '分页数量', '每页显示的日志数量');
         $isDrop = new Typecho_Widget_Helper_Form_Element_Radio(
             'isDrop', array(
