@@ -58,6 +58,7 @@ class Access_UA {
 		'crawler',
 		'bingbot',
 		'Go-http-client',
+		'zgrab',
 	);
 
 	private $ua;
