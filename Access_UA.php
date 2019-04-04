@@ -108,7 +108,7 @@ class Access_UA {
 	public function isRobot() {
 		if ($this->robotID === null) {
 			if (!empty($this->ua)) {
-				if (preg_match('#([a-zA-Z0-9]+\s*(?:-?bot|spider))[ /v]*([0-9.]*)#i', $this->ua, $matches)) {
+				if (preg_match('#([a-zA-Z0-9]+\s*(?:-?bot|spider|-?client))[ /v]*([0-9.]*)#i', $this->ua, $matches)) {
 					$this->robotID = $this->robotName = $matches[1];
 					$this->robotVersion = $matches[2];
 				}
