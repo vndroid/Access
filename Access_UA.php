@@ -303,7 +303,7 @@ class Access_UA {
 				$this->browserID = 'Quark';
 				$this->browserName = 'Quark';
 				$this->browserVersion = $matches[1];
-			} elseif (preg_match('#LBBROWSER([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+			} elseif (preg_match('#LBBROWSER#i', $this->ua, $matches)) {
 				$this->browserID = 'LieBao';
 				$this->browserName = '猎豹浏览器';
 				$this->browserVersion = '6';
