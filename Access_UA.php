@@ -267,13 +267,17 @@ class Access_UA {
 			} elseif (preg_match('#OPR/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = 'Opera';
 				$this->browserName = 'Opera';
-                $this->browserVersion = $matches[1];
+				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#MQQBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				$this->browserID = 'QQMobile';
+				$this->browserName = 'QQ浏览器';
+				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#QQBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = 'QQBrowser';
 				$this->browserName = 'QQ浏览器';
 				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#360 Alitephone Browser \(.*?\/([\d+\.]+[\d+])\)#i', $this->ua, $matches)) {
-				$this->browserID = '360Browser';
+				$this->browserID = '360Alite';
 				$this->browserName = '极速浏览器';
 				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#Qiyu/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
@@ -288,13 +292,21 @@ class Access_UA {
 				$this->browserID = $this->browserName = 'UCWEB';
 				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#UCBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				$this->browserID = 'UCMobile';
+				$this->browserName = 'UC浏览器';
+				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#UBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = 'UCBrowser';
 				$this->browserName = 'UC浏览器';
 				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#Quark/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = 'Quark';
 				$this->browserName = 'Quark';
-                $this->browserVersion = $matches[1];
+				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#LBBROWSER([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				$this->browserID = 'LieBao';
+				$this->browserName = '猎豹浏览器';
+				$this->browserVersion = '6';
 			} elseif (preg_match('#Maxthon( |\/)([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = $this->browserName = 'Maxthon';
 				$this->browserVersion = $matches[2];
@@ -315,7 +327,7 @@ class Access_UA {
 				$this->browserID = $this->browserName = 'Safari';
 				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#QQ/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-				$this->browserID = 'QQ';
+				$this->browserID = 'MobileQQ';
 				$this->browserName = '手机QQ';
 				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#MSIE ([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
@@ -324,7 +336,7 @@ class Access_UA {
 			} elseif (preg_match('#Trident#', $this->ua, $matches)) {
 				$this->browserID = $this->browserName = 'Internet Explorer';
 				$this->browserVersion = '11';
-			} elseif (preg_match('#(Firefox|Phoenix|Firebird|BonEcho|GranParadiso|Minefield|Iceweasel)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+			} elseif (preg_match('#(Firefox|Fenix|Phoenix|Firebird|BonEcho|GranParadiso|Minefield|Iceweasel)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = $this->browserName = 'Firefox';
 				$this->browserVersion = $matches[2];
 			} else {
