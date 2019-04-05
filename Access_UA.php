@@ -59,6 +59,7 @@ class Access_UA {
 		'bingbot',
 		'Go-http-client',
 		'zgrab',
+		'WordPress',
 	);
 
 	private $ua;
