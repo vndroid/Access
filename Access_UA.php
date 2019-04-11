@@ -7,11 +7,10 @@ class Access_UA {
 	private static $robots = array(
 		'DuckDuckBot',              // DuckDuckGo
 		'DuckDuckGo-Favicons-Bot',  // DuckDuckGo Favicons
-		'gce-spider',               // Google
+		'gce-spider',               // Google App Engine Software
 		'YisouSpider',              // 宜搜
 		'YandexBot',                // Yandex
 		'UptimeRobot',              // Uptimerobot
-		'Blackboard Safeassign',    // BlackBoard
 		'Nimbostratus-Bot',
 		'TencentTraveler',
 		'Baiduspider',
@@ -20,7 +19,8 @@ class Access_UA {
 		'msnbot',
 		'Sosospider+',
 		'Sogou web spider',
-		'ia_archiver',
+		'Sogou inst spider',
+		'ia_archiver',              // Alexa Bot
 		'Yahoo! Slurp',
 		'YoudaoBot',
 		'Yahoo Slurp',
