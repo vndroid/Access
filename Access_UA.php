@@ -277,6 +277,10 @@ class Access_UA {
 				$this->browserID = 'QQBrowser';
 				$this->browserName = 'QQ浏览器';
 				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#Thunder/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				$this->browserID = 'Thunder';
+				$this->browserName = '迅雷X';
+				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#360 Alitephone Browser \(.*?\/([\d+\.]+[\d+])\)#i', $this->ua, $matches)) {
 				$this->browserID = '360Alite';
 				$this->browserName = '极速浏览器';
