@@ -269,6 +269,10 @@ class Access_UA {
 				$this->browserID = 'Opera';
 				$this->browserName = 'Opera';
 				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#OPT/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				$this->browserID = 'Opera Touch';
+				$this->browserName = 'Opera Touch';
+				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#MQQBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = 'QQMobile';
 				$this->browserName = 'QQ浏览器';
