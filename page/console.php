@@ -341,7 +341,7 @@ $(document).ready(function() {
 
         switch ($filterSelect.val()) {
             case 'ip':
-                $ipInput.attr('placeholder', '输入ip').show();
+                $ipInput.attr('placeholder', '输入IP').show();
                 break;
             case 'post':
                 $cidSelect.show();
