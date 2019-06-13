@@ -6,7 +6,7 @@ Record typecho system access logs and analytics.
 
 ### Lastest Update Description
 
-* Fix UA detect roles bug.
+* Add [Opera GX](https://www.opera.com/gx#start) Support.
 
 ### Notice
 

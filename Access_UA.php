@@ -265,6 +265,10 @@ class Access_UA {
 				$this->browserID = '360';
 				$this->browserName = '360浏览器';
 				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#OPRGX/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				$this->browserID = 'Opera GX';
+				$this->browserName = 'Opera GX';
+				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#OPR/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = 'Opera';
 				$this->browserName = 'Opera';
