@@ -10,12 +10,13 @@ class Access_UA {
 		'gce-spider',               // Google App Engine Software
 		'YisouSpider',              // 宜搜
 		'YandexBot',                // Yandex
-		'UptimeRobot',              // Uptimerobot
+		'UptimeRobot',              // UptimeRobot
 		'Nimbostratus-Bot',
 		'TencentTraveler',
 		'Baiduspider',
 		'BaiduGame',
 		'Googlebot',
+		'BingPreview',              // 必应预览
 		'msnbot',
 		'Sosospider+',
 		'Sogou web spider',
