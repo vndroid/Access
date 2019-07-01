@@ -8,6 +8,7 @@ Record typecho system access logs and analytics.
 
 * Add [Opera GX](https://www.opera.com/gx#start) Support.
 * Add [BaiduApp](https://mo.baidu.com/) Support.
+* Add [BaiduBrowser](https://mb.baidu.com/) Support.
 
 ### Notice
 
