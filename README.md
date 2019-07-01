@@ -7,6 +7,7 @@ Record typecho system access logs and analytics.
 ### Lastest Update Description
 
 * Add [Opera GX](https://www.opera.com/gx#start) Support.
+* Add [BaiduApp](https://mo.baidu.com/) Support.
 
 ### Notice
 

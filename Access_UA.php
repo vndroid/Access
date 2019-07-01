@@ -261,6 +261,10 @@ class Access_UA {
 				$this->browserID = 'SE 2';
 				$this->browserName = '搜狗浏览器 2';
 				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#baiduboxapp/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				$this->browserID = 'BaiduApp';
+				$this->browserName = '手机百度';
+				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#360([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = '360';
 				$this->browserName = '360浏览器';
