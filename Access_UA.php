@@ -338,7 +338,7 @@ class Access_UA {
 				// UCMobile Android
 				$this->browserID = 'UCMobile';
 				$this->browserName = 'UC浏览器';
-				$this->browserVersion = $matches[1];
+				$this->browserVersion = $matches[2];
 			} elseif (preg_match('#Quark/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				// Quark Android / iOS
 				$this->browserID = 'Quark';
@@ -362,7 +362,7 @@ class Access_UA {
 			} elseif (preg_match('#(Edg|Edge|EdgiOS)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				// Edge Chromium / EdgeHTML / iOS 
 				$this->browserID = $this->browserName = 'Edge';
-				$this->browserVersion = $matches[1];
+				$this->browserVersion = $matches[2];
 			} elseif (preg_match('#Chrome/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				$this->browserID = $this->browserName = 'Chrome';
 				$this->browserVersion = $matches[1];
