@@ -61,6 +61,7 @@ class Access_UA {
 		'Go-http-client',
 		'zgrab',
 		'WordPress',
+		'Scrapy',
 	);
 
 	private $ua;
