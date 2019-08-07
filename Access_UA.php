@@ -12,6 +12,7 @@ class Access_UA {
 		'YandexBot',                // Yandex
 		'UptimeRobot',              // UptimeRobot
 		'Nimbostratus-Bot',
+		'Presto',                   // SQL 注入程序
 		'TencentTraveler',
 		'Baiduspider',
 		'BaiduGame',
@@ -360,8 +361,8 @@ class Access_UA {
 				$this->browserID = 'MiuiBrowser';
 				$this->browserName = '小米浏览器';
 				$this->browserVersion = $matches[1];
-			} elseif (preg_match('#(Edg|Edge|EdgiOS)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-				// Edge Chromium / EdgeHTML / iOS 
+			} elseif (preg_match('#(Edg|Edge|EdgA|EdgiOS)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				// Edge Chromium / EdgeHTML / Android / iOS 
 				$this->browserID = $this->browserName = 'Edge';
 				$this->browserVersion = $matches[2];
 			} elseif (preg_match('#Chrome/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {

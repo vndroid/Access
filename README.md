@@ -6,9 +6,10 @@ Record typecho system access logs and analytics.
 
 ### Lastest Update Description
 
-* Add [Opera GX](https://www.opera.com/gx#start) Support.
-* Add [BaiduApp](https://mo.baidu.com/) Support.
-* Add [BaiduBrowser](https://mb.baidu.com/) Support.
+* Add [SogouSearch](https://www.sogou.com/) Support.
+* Add [SogouMobileBrowser](https://mse.sogou.com/) Support.
+* Add [Edge Android/iOS](https://www.microsoft.com/en-us/windows/microsoft-edge) Support.
+* General bug fixes and performance improvements.
 
 ### Notice
 
