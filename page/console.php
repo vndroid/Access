@@ -82,11 +82,11 @@ $access = new Access_Core();
                         <thead>
                             <tr>
                                 <th> </th>
-                                <th><?php _e('受访地址'); ?></th>
+                                <th><?php _e('Path'); ?></th>
                                 <th><?php _e('UA'); ?></th>
-                                <th><?php _e('IP地址'); ?></th>
-                                <th><?php _e('Referer'); ?></th>
-                                <th><?php _e('日期'); ?></th>
+                                <th><?php _e('IP'); ?></th>
+                                <th><?php _e('Referrals'); ?></th>
+                                <th><?php _e('Date'); ?></th>
                             </tr>
                         </thead>
                         <tbody>
