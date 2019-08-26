@@ -306,16 +306,11 @@ class Access_UA {
 				$this->browserID = 'Vivaldi';
 				$this->browserName = 'Vivaldi';
 				$this->browserVersion = $matches[1];
-			} elseif (preg_match('#MQQBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-				// QQ Browser Android
-				$this->browserID = 'MQQBrowser';
-				$this->browserName = 'QQ浏览器';
-				$this->browserVersion = $matches[1];
-			} elseif (preg_match('#QQBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-				// QQ Browser PC / macOS
+			} elseif (preg_match('#(MQQBrowser|QQBrowser)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				// QQ Browser Android / PC & macOS
 				$this->browserID = 'QQBrowser';
 				$this->browserName = 'QQ浏览器';
-				$this->browserVersion = $matches[1];
+				$this->browserVersion = $matches[2];
 			} elseif (preg_match('#QQ/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				// MobileQQ Android
 				$this->browserID = 'MobileQQ';
@@ -336,13 +331,13 @@ class Access_UA {
 				$this->browserID = 'Qiyu';
 				$this->browserName = '旗鱼浏览器';
 				$this->browserVersion = $matches[1];
-			} elseif (preg_match('#UCWEB([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-				// UC Symbian / BlackBerry and older version
-				$this->browserID = 'UCWEB';
-				$this->browserName = 'UC浏览器（旧）';
+			} elseif (preg_match('#UCTurbo([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				// UC Turbo Google Play version
+				$this->browserID = 'UCTurbo';
+				$this->browserName = 'UCTurbo';
 				$this->browserVersion = $matches[1];
-			} elseif (preg_match('#(UCBrowser|UBrowser)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-				// UCMobile Android
+			} elseif (preg_match('#(UCBrowser|UBrowser|UCWEB)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				// UCMobile Android / Symbian & BlackBerry and older version
 				$this->browserID = 'UCMobile';
 				$this->browserName = 'UC浏览器';
 				$this->browserVersion = $matches[2];
