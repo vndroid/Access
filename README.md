@@ -6,10 +6,9 @@ Record typecho system access logs and analytics.
 
 ### Lastest Update Description
 
-* Add [Sogou Search App](https://www.sogou.com/) Support.
-* Add [Sogou Mobile Browser](https://mse.sogou.com/) Support.
 * Add [Edge Android/iOS](https://www.microsoft.com/en-us/windows/microsoft-edge) Support.
 * Add [UC Turbo](https://play.google.com/store/apps/details?id=com.ucturbo) Support.
+* Add [Samsung Browser](https://play.google.com/store/apps/details?id=com.sec.android.app.sbrowser) Support.
 * General bug fixes and performance improvements.
 
 ### Notice
