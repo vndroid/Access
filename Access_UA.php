@@ -331,7 +331,7 @@ class Access_UA {
 				$this->browserID = 'Qiyu';
 				$this->browserName = '旗鱼浏览器';
 				$this->browserVersion = $matches[1];
-			} elseif (preg_match('#UCTurbo([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+			} elseif (preg_match('#UCTurbo/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				// UC Turbo Google Play version
 				$this->browserID = 'UCTurbo';
 				$this->browserName = 'UCTurbo';
