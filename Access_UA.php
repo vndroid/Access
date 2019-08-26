@@ -346,6 +346,11 @@ class Access_UA {
 				$this->browserID = 'Quark';
 				$this->browserName = 'Quark';
 				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#SamsungBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				// Samsung Phone Browser Android
+				$this->browserID = 'SamsungBrowser';
+				$this->browserName = '三星浏览器';
+				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#SogouSearch.*/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				// SogouSearch Android
 				$this->browserID = 'SogouSearch';
