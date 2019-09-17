@@ -140,7 +140,7 @@ $access = new Access_Core();
 
             <div class="col-mb-12 typecho-list">
 
-               <h4 class="typecho-list-table-title">访问数表格</h4>
+               <h4 class="typecho-list-table-title">访问数据总览</h4>
 
                 <div class="typecho-table-wrap">
                     <table class="typecho-list-table">
@@ -153,9 +153,9 @@ $access = new Access_Core();
                         <thead>
                             <tr>
                                 <th> </th>
-                                <th><?php _e('浏览量(PV)'); ?></th>
-                                <th><?php _e('访客数(UV)'); ?></th>
-                                <th><?php _e('IP数'); ?></th>
+                                <th><?php _e('PV'); ?></th>
+                                <th><?php _e('UV'); ?></th>
+                                <th><?php _e('IP'); ?></th>
                             </tr>
                         </thead>
                         <tbody>
