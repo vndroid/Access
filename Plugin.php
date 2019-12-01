@@ -107,7 +107,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
         
         if (strpos($adapterName, 'Mysql') !== false) {
             $prefix  = $db->getPrefix();
-            $scripts = file_get_contents('usr/plugins/Access/sql/Mysql.sql');
+            $scripts = file_get_contents('usr/plugins/Access/sql/MySQL.sql');
             $scripts = str_replace('typecho_', $prefix, $scripts);
             $scripts = str_replace('%charset%', 'utf8', $scripts);
             $scripts = explode(';', $scripts);
