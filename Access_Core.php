@@ -68,10 +68,10 @@ class Access_Core
         $filter = $this->request->get('filter', 'all');
         $pagenum = $this->request->get('page', 1);
         $offset = (max(intval($pagenum), 1) - 1) * $this->config->pageSize;
-        $query = $this->db->select()->from('table.access_log')
+        $query = $this->db->select()->from('table.access')
             ->order('time', Typecho_Db::SORT_DESC)
             ->offset($offset)->limit($this->config->pageSize);
-        $qcount = $this->db->select('count(1) AS count')->from('table.access_log');
+        $qcount = $this->db->select('count(1) AS count')->from('table.access');
         switch ($type) {
             case 1:
                 $query->where('robot = ?', 0);
@@ -139,10 +139,10 @@ class Access_Core
         $this->logs['page'] = $page->show();
 
         $this->logs['cidList'] = $this->db->fetchAll($this->db->select('DISTINCT content_id as cid, COUNT(1) as count, table.contents.title')
-                ->from('table.access_log')
-                ->join('table.contents', 'table.access_log.content_id = table.contents.cid')
-                ->where('table.access_log.content_id <> ?', null)
-                ->group('table.access_log.content_id')
+                ->from('table.access')
+                ->join('table.contents', 'table.access.content_id = table.contents.cid')
+                ->where('table.access.content_id <> ?', null)
+                ->group('table.access.content_id')
                 ->order('count', Typecho_Db::SORT_DESC));
     }
 
@@ -155,10 +155,10 @@ class Access_Core
     protected function parseReferer()
     {
         $this->referer['url'] = $this->db->fetchAll($this->db->select('DISTINCT entrypoint AS value, COUNT(1) as count')
-                ->from('table.access_log')->where("entrypoint <> ''")->group('entrypoint')
+                ->from('table.access')->where("entrypoint <> ''")->group('entrypoint')
                 ->order('count', Typecho_Db::SORT_DESC)->limit($this->config->pageSize));
         $this->referer['domain'] = $this->db->fetchAll($this->db->select('DISTINCT entrypoint_domain AS value, COUNT(1) as count')
-                ->from('table.access_log')->where("entrypoint_domain <> ''")->group('entrypoint_domain')
+                ->from('table.access')->where("entrypoint_domain <> ''")->group('entrypoint_domain')
                 ->order('count', Typecho_Db::SORT_DESC)->limit($this->config->pageSize));
         $this->referer = $this->htmlEncode($this->urlDecode($this->referer));
     }
@@ -184,7 +184,7 @@ class Access_Core
                 $start = strtotime(date("{$time} {$i}:00:00"));
                 $end = strtotime(date("{$time} {$i}:59:59"));
                 // "SELECT DISTINCT ip FROM {$this->table} {$where} AND `time` BETWEEN {$start} AND {$end}"));
-                $subQuery = $this->db->select('DISTINCT ip')->from('table.access_log')
+                $subQuery = $this->db->select('DISTINCT ip')->from('table.access')
                     ->where("time >= ? AND time <= ?", $start, $end);
                 if (method_exists($subQuery, 'prepare')) {
                     $subQuery = $subQuery->prepare($subQuery);
@@ -192,7 +192,7 @@ class Access_Core
                 $this->overview['ip'][$day]['hours'][$i] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')
                         ->from('(' . $subQuery . ') AS tmp'))[0]['count']);
                 // "SELECT DISTINCT ip,ua FROM {$this->table} {$where} AND `time` BETWEEN {$start} AND {$end}"));
-                $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access_log')
+                $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')
                     ->where("time >= ? AND time <= ?", $start, $end);
                 if (method_exists($subQuery, 'prepare')) {
                     $subQuery = $subQuery->prepare($subQuery);
@@ -201,27 +201,27 @@ class Access_Core
                         ->from('(' . $subQuery . ') AS tmp'))[0]['count']);
                 // "SELECT ip FROM {$this->table} {$where} AND `time` BETWEEN {$start} AND {$end}"));
                 $this->overview['pv'][$day]['hours'][$i] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('table.access_log')->where('time >= ? AND time <= ?', $start, $end))[0]['count']);
+                        ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count']);
 
             }
 
             $start = strtotime(date("{$time} 00:00:00"));
             $end = strtotime(date("{$time} 23:59:59"));
 
-            $subQuery = $this->db->select('DISTINCT ip')->from('table.access_log')->where("time >= ? AND time <= ?", $start, $end);
+            $subQuery = $this->db->select('DISTINCT ip')->from('table.access')->where("time >= ? AND time <= ?", $start, $end);
             if (method_exists($subQuery, 'prepare')) {
                 $subQuery = $subQuery->prepare($subQuery);
             }
             $this->overview['ip'][$day]['total'] = $this->db->fetchAll($this->db->select('COUNT(1) AS count')->from('(' . $subQuery . ') AS tmp'))[0]['count'];
 
-            $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access_log')->where("time >= ? AND time <= ?", $start, $end);
+            $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')->where("time >= ? AND time <= ?", $start, $end);
             if (method_exists($subQuery, 'prepare')) {
                 $subQuery = $subQuery->prepare($subQuery);
             }
             $this->overview['uv'][$day]['total'] = $this->db->fetchAll($this->db->select('COUNT(1) AS count')->from('(' . $subQuery . ') AS tmp'))[0]['count'];
 
             $this->overview['pv'][$day]['total'] = $this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                    ->from('table.access_log')
+                    ->from('table.access')
                     ->where("time >= ? AND time <= ?", $start, $end)
             )[0]['count'];
         }
@@ -229,13 +229,13 @@ class Access_Core
         # 总统计数据
         // "SELECT DISTINCT ip FROM {$this->table} {$where}"));
         $this->overview['ip']['all']['total'] = $this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                ->from('(' . $this->db->select('DISTINCT ip')->from('table.access_log') . ') AS tmp'))[0]['count'];
+                ->from('(' . $this->db->select('DISTINCT ip')->from('table.access') . ') AS tmp'))[0]['count'];
         // "SELECT DISTINCT ip,ua FROM {$this->table} {$where}"));
         $this->overview['uv']['all']['total'] = $this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                ->from('(' . $this->db->select('DISTINCT ip,ua')->from('table.access_log') . ') AS tmp'))[0]['count'];
+                ->from('(' . $this->db->select('DISTINCT ip,ua')->from('table.access') . ') AS tmp'))[0]['count'];
         // "SELECT ip FROM {$this->table} {$where}"));
         $this->overview['pv']['all']['total'] = $this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                ->from('table.access_log'))[0]['count'];
+                ->from('table.access'))[0]['count'];
 
         # 分类型绘制24小时访问图
         $this->overview['chart']['xAxis']['categories'] = Json::encode(range(0, 23));
@@ -325,7 +325,7 @@ class Access_Core
     public function deleteLogs($ids)
     {
         foreach ($ids as $id) {
-            $this->db->query($this->db->delete('table.access_log')
+            $this->db->query($this->db->delete('table.access')
                     ->where('id = ?', $id)
             );
         }
@@ -408,7 +408,7 @@ class Access_Core
         );
 
         try {
-            $this->db->query($this->db->insert('table.access_log')->rows($rows));
+            $this->db->query($this->db->insert('table.access')->rows($rows));
         } catch (Exception $e) {} catch (Typecho_Db_Query_Exception $e) {}
     }
 
@@ -422,7 +422,7 @@ class Access_Core
     public static function rewriteLogs()
     {
         $db = Typecho_Db::get();
-        $rows = $db->fetchAll($db->select()->from('table.access_log'));
+        $rows = $db->fetchAll($db->select()->from('table.access'));
         foreach ($rows as $row) {
             $ua = new Access_UA($row['ua']);
             $row['browser_id'] = $ua->getBrowserID();
@@ -433,7 +433,7 @@ class Access_Core
             $row['robot_id'] = $ua->getRobotID();
             $row['robot_version'] = $ua->getRobotVersion();
             try {
-                $db->query($db->update('table.access_log')->rows($row)->where('id = ?', $row['id']));
+                $db->query($db->update('table.access')->rows($row)->where('id = ?', $row['id']));
             } catch (Typecho_Db_Exception $e) {
                 throw new Typecho_Plugin_Exception(_t('刷新数据库失败：%s。', $e->getMessage()));
             }
