@@ -124,8 +124,8 @@ class Access_Plugin implements Typecho_Plugin_Interface
                     $msg = _t('成功创建数据表，插件启用成功，') . $configLink;
                 }
                 # 处理旧版本数据
-                if ($db->fetchRow($db->query("SHOW TABLES LIKE '{$prefix}access';", Typecho_Db::READ))) {
-                    $rows = $db->fetchAll($db->select()->from('table.access'));
+                if ($db->fetchRow($db->query("SHOW TABLES LIKE '{$prefix}access_log';", Typecho_Db::READ))) {
+                    $rows = $db->fetchAll($db->select()->from('table.access_log'));
                     set_time_limit(1800);
                     foreach ($rows as $row) {
                         $ua = new Access_UA($row['ua']);
