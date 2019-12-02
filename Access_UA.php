@@ -286,7 +286,12 @@ class Access_UA {
 				$this->browserID = 'Opera GX';
 				$this->browserName = 'Opera GX';
 				$this->browserVersion = $matches[1];
-			} elseif (preg_match('#2345Explorer/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+			} elseif (preg_match('#FxiOS/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+                // Firefox Focus
+                $this->browserID = 'FxiOS';
+                $this->browserName = 'Firefox Focus';
+                $this->browserVersion = $matches[1];
+            } elseif (preg_match('#2345Explorer/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				// 2345Explorer Browser PC
 				$this->browserID = '2345Explorer';
 				$this->browserName = '2345Explorer';
