@@ -126,6 +126,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
                 # 处理旧版本数据
                 if ($db->fetchRow($db->query("SHOW TABLES LIKE '{$prefix}access';", Typecho_Db::READ))) {
                     $rows = $db->fetchAll($db->select()->from('table.access'));
+                    set_time_limit(1800);
                     foreach ($rows as $row) {
                         $ua = new Access_UA($row['ua']);
                         $time = Helper::options()->gmtTime + (Helper::options()->timezone - Helper::options()->serverTimezone);
