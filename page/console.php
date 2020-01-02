@@ -366,7 +366,9 @@ $(document).ready(function() {
 <script src="<?php $options->pluginUrl('Access/sweetalert/sweetalert.min.js')?>"></script>
 <?php if($access->action == 'overview'):?>
 <script src="<?php $options->pluginUrl('Access/highcharts/highcharts.js')?>"></script>
+<script src="<?php $options->pluginUrl('Access/highcharts/modules/series-label.js')?>"></script>
 <script src="<?php $options->pluginUrl('Access/highcharts/modules/exporting.js')?>"></script>
+<script src="<?php $options->pluginUrl('Access/highcharts/modules/export-data.js')?>"></script>
 <script type="text/javascript">
 $(document).ready(function() {
     $('#chart').highcharts({
