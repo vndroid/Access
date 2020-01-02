@@ -37,7 +37,7 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
             if (is_array($response)) {
                 $response = array(
                     'code' => 0,
-                    'data' => implode(' ', $response),
+                    'data' => $response,
                 );
             } else {
                 throw new Exception('解析 IP 失败');
@@ -56,7 +56,7 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
             } catch (Exception $e) {
                 $response = array(
                     'code' => 100,
-                    'data' => '很抱歉，ipip.net 查询无结果，同时你的服务器无法连接 fallback 接口(tools.keycdn.com)',
+                    'data' => '很抱歉，ipip.net 查询无结果，同时服务器无法连接 fallback 接口(tools.keycdn.com)',
                 );
             }
         }
