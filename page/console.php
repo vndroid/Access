@@ -5,7 +5,7 @@ include 'menu.php';
 require_once __DIR__ . '/../Access_Bootstrap.php';
 $access = new Access_Core();
 ?>
-<link rel="stylesheet" href="<?php $options->pluginUrl('Access/lib/sweetalert/sweetalert.css')?>">
+<link rel="stylesheet" href="<?php $options->pluginUrl('Access/sweetalert/sweetalert.css')?>">
 <div class="main">
     <div class="body container">
         <div class="typecho-page-title">
@@ -14,8 +14,8 @@ $access = new Access_Core();
         <div class="row typecho-page-main" role="main">
              <div class="col-mb-12">
                 <ul class="typecho-option-tabs fix-tabs clearfix">
-                    <li<?=($access->action == 'overview' ? ' class="current"' : '')?>><a href="<?php $options->adminUrl('extending.php?panel=' . Access_Plugin::$panel . '&action=overview'); ?>"><?php _e('访问概览'); ?></a></li>
-                    <li<?=($access->action == 'logs' ? ' class="current"' : '')?>><a href="<?php $options->adminUrl('extending.php?panel=' . Access_Plugin::$panel . '&action=logs'); ?>"><?php _e('访问日志'); ?></a></li>
+                    <li <?=($access->action == 'overview' ? ' class="current"' : '')?>><a href="<?php $options->adminUrl('extending.php?panel=' . Access_Plugin::$panel . '&action=overview'); ?>"><?php _e('访问概览'); ?></a></li>
+                    <li <?=($access->action == 'logs' ? ' class="current"' : '')?>><a href="<?php $options->adminUrl('extending.php?panel=' . Access_Plugin::$panel . '&action=logs'); ?>"><?php _e('访问日志'); ?></a></li>
                     <li><a href="<?php $options->adminUrl('options-plugin.php?config=Access') ?>"><?php _e('插件设置'); ?></a></li>
                 </ul>
             </div>
@@ -296,8 +296,8 @@ $(document).ready(function() {
           cancelButtonText: '算啦',
           closeOnConfirm: false
         }, function() {
-                var ids = [];
-                $('.typecho-list-table input[type="checkbox"]').each(function(index, elem) {
+            const ids = [];
+            $('.typecho-list-table input[type="checkbox"]').each(function(index, elem) {
                     if (elem.checked) {
                         ids.push($(elem).data('id'));
                     }
@@ -324,15 +324,15 @@ $(document).ready(function() {
                     }
                 });
         });
-        var $this = $(this);
+        const $this = $(this);
         $this.parents('.dropdown-menu').hide().prev().removeClass('active');
     });
 
-    var $form = $('form.search-form');
-    var $ipInput = $form.find('input[name="ip"]');
-    var $cidSelect = $form.find('select[name="cid"]');
-    var $pathInput = $form.find('input[name="path"]');
-    var $filterSelect = $form.find('select[name="filter"]');
+    const $form = $('form.search-form');
+    const $ipInput = $form.find('input[name="ip"]');
+    const $cidSelect = $form.find('select[name="cid"]');
+    const $pathInput = $form.find('input[name="path"]');
+    const $filterSelect = $form.find('select[name="filter"]');
 
     $filterSelect.on('change', function() {
         $ipInput.removeAttr('placeholder').val('').hide();
@@ -353,7 +353,7 @@ $(document).ready(function() {
     });
 
     $form.find('button[type="button"]').on('click', function() {
-        var ipRegex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+        const ipRegex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
 
         if ($filterSelect.val() == 'ip' && !ipRegex.test($ipInput.val())) {
             return swal('筛选条件错误', 'IP 地址不合法', 'warning');
@@ -363,10 +363,10 @@ $(document).ready(function() {
     });
 });
 </script>
-<script src="<?php $options->pluginUrl('Access/lib/sweetalert/sweetalert.min.js')?>"></script>
+<script src="<?php $options->pluginUrl('Access/sweetalert/sweetalert.min.js')?>"></script>
 <?php if($access->action == 'overview'):?>
-<script src="<?php $options->pluginUrl('Access/lib/highcharts/js/highcharts.js')?>"></script>
-<script src="<?php $options->pluginUrl('Access/lib/highcharts/js/modules/exporting.js')?>"></script>
+<script src="<?php $options->pluginUrl('Access/highcharts/highcharts.js')?>"></script>
+<script src="<?php $options->pluginUrl('Access/highcharts/modules/exporting.js')?>"></script>
 <script type="text/javascript">
 $(document).ready(function() {
     $('#chart').highcharts({
