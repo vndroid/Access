@@ -67,14 +67,14 @@ class Access_Plugin implements Typecho_Plugin_Interface
             '分页数量', '每页显示的日志数量');
         $isDrop = new Typecho_Widget_Helper_Form_Element_Radio(
             'isDrop', array(
-                '0' => '删除',
-                '1' => '不删除',
-            ), '1', '删除数据表:', '请选择是否在禁用插件时，删除日志数据表');
+                '0' => '是',
+                '1' => '否',
+            ), '1', '禁用时清空数据', '请选择是否在禁用插件时，删除日志数据表');
         $writeType = new Typecho_Widget_Helper_Form_Element_Radio(
             'writeType', array(
-                '0' => '后端',
-                '1' => '前端',
-            ), '0', '日志写入类型:', '请选择日志写入类型，如果写入速度较慢可选择前端写入日志。<br/>如果您使用了 pjax，请在 pjax 相关事件中调用 window.Access.track() 方法。');
+                '0' => '前端',
+                '1' => '后端',
+            ), '1', '日志写入类型', '日志写入类型，若写入速度较慢可选择前端写入日志（若选择为前端方式，如果使用了 PJAX，请在 PJAX 相关事件中调用 window.Access.track() 方法）');
         $form->addInput($pageSize);
         $form->addInput($isDrop);
         $form->addInput($writeType);
@@ -201,7 +201,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
         $access = new Access_Core();
         $config = Typecho_Widget::widget('Widget_Options')->plugin('Access');
 
-        if ($config->writeType == 0) {
+        if ($config->writeType == 1) {
             $access->writeLogs($archive);
         }
     }
@@ -215,7 +215,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
     public static function frontend($archive)
     {
         $config = Typecho_Widget::widget('Widget_Options')->plugin('Access');
-        if ($config->writeType == 1) {
+        if ($config->writeType == 0) {
             $index = rtrim(Helper::options()->index, '/');
             $access = new Access_Core();
             $parsedArchive = $access->parseArchive($archive);
