@@ -276,11 +276,11 @@ class Access_UA {
 				$this->browserID = 'BaiduBrowser';
 				$this->browserName = '百度浏览器';
 				$this->browserVersion = $matches[1];
-			} elseif (preg_match('#360([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+			} elseif (preg_match('#(QIHU|360EE)#i', $this->ua, $matches)) {
 				// 360 Browser PC
-				$this->browserID = '360Browser';
-				$this->browserName = '360浏览器';
-				$this->browserVersion = $matches[1];
+				$this->browserID = '360EE';
+				$this->browserName = '360极速浏览器';
+				$this->browserVersion = '1.0';
 			} elseif (preg_match('#OPRGX/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				// Opera Gaming Browser PC
 				$this->browserID = 'Opera GX';
