@@ -34,4 +34,3 @@ CREATE TABLE `typecho_access` (
   KEY `idx_referer`           (`referer`          ),
   KEY `idx_referer_domain`    (`referer_domain`   )
 ) ENGINE=InnoDB DEFAULT CHARSET=%charset%;
-
