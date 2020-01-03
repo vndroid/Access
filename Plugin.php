@@ -43,7 +43,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
     public static function deactivate()
     {
         $config = Typecho_Widget::widget('Widget_Options')->plugin('Access');
-        if ($config->isDrop == 0) {
+        if ($config->isDrop == 1) {
             $db = Typecho_Db::get();
             $db->query("DROP TABLE `{$db->getPrefix()}access`", Typecho_Db::WRITE);
         }
@@ -67,9 +67,9 @@ class Access_Plugin implements Typecho_Plugin_Interface
             '分页数量', '每页显示的日志数量');
         $isDrop = new Typecho_Widget_Helper_Form_Element_Radio(
             'isDrop', array(
-                '0' => '是',
-                '1' => '否',
-            ), '1', '禁用时清空数据', '请选择是否在禁用插件时，删除日志数据表');
+                '0' => '否',
+                '1' => '是',
+            ), '0', '禁用时删除日志表', '请选择是否在禁用插件时，删除日志数据表');
         $writeType = new Typecho_Widget_Helper_Form_Element_Radio(
             'writeType', array(
                 '0' => '前端',
@@ -100,7 +100,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
     public static function install()
     {
         if (substr(trim(dirname(__FILE__), '/'), -6) != 'Access') {
-            throw new Typecho_Plugin_Exception(_t('插件目录名必须为Access'));
+            throw new Typecho_Plugin_Exception(_t('插件目录名必须为 Access'));
         }
         $db = Typecho_Db::get();
         $adapterName = $db->getAdapterName();
@@ -109,7 +109,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
             $prefix  = $db->getPrefix();
             $scripts = file_get_contents('usr/plugins/Access/sql/MySQL.sql');
             $scripts = str_replace('typecho_', $prefix, $scripts);
-            $scripts = str_replace('%charset%', 'utf8', $scripts);
+            $scripts = str_replace('%charset%', 'utf8mb4', $scripts);
             $scripts = explode(';', $scripts);
             try {
                 $configLink = '<a href="' . Helper::options()->adminUrl . 'options-plugin.php?config=Access">' . _t('前往设置') . '</a>';
