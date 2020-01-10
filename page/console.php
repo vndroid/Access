@@ -287,13 +287,13 @@ $(document).ready(function() {
 
     $('.dropdown-menu a[data-action="delete"]').click(function() {
         swal({
-          title: '你确定?',
-          text: '你确认要删除这些记录吗?',
+          title: '确认操作',
+          text: '是否删除选定的记录？',
           type: 'warning',
           showCancelButton: true,
           confirmButtonColor: '#DD6B55',
-          confirmButtonText: '是的',
-          cancelButtonText: '算啦',
+          confirmButtonText: '是',
+          cancelButtonText: '否',
           closeOnConfirm: false
         }, function() {
             const ids = [];
@@ -304,7 +304,7 @@ $(document).ready(function() {
                 });
 
                 if (ids.length == 0) {
-                    return swal('错误', '你并没有勾选任何内容', 'warning');
+                    return swal('错误', '并没有勾选任何内容', 'warning');
                 }
                 $.ajax({
                     url: '<?php echo rtrim(Helper::options()->index, '/').'/access/log/delete.json';?>',
@@ -319,7 +319,7 @@ $(document).ready(function() {
                                 $('.typecho-list-table tbody tr[data-id="' + elem + '"]').fadeOut(500).remove();
                             });
                         } else {
-                            swal('错误', '发生错误了', 'warning');
+                            swal('抱歉', '发生了错误', 'warning');
                         }
                     }
                 });

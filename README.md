@@ -1,10 +1,16 @@
-# AccessLogs
+# Access
 
 ## Access Logs Plugin For Typecho
 
 Record typecho system access logs and analytics.
 
-### Lastest Update Description
+## Intro
+
+Current Version: 2.3.1(200110) | [CHANGELOG](/CHANGELOG)
+
+Current Lauguage: [English](/README.md) | [Simplified Chinese](/README_CN.md)
+
+### Latest Update Description
 
 * Add [Firefox Focus](https://play.google.com/store/apps/details?id=org.mozilla.focus) Support.
 * Add [Edge Android/iOS](https://www.microsoft.com/en-us/windows/microsoft-edge) Support.
@@ -27,11 +33,6 @@ Record typecho system access logs and analytics.
 - Support Frontend or Backend write log.
 - Log filter supports filtering by ip, article title, and route
 
-### Todo
-
-- IPv6 Support
-- Use IPDB instead of DataX (Better performance)
-
 ### Author
 
 [@kokororin](https://github.com/kokororin)
@@ -40,6 +41,6 @@ Record typecho system access logs and analytics.
 
 [@Zhizheng Zhang](https://github.com/izhizheng)
 
-[@Cain](https://github.com/Vndroid)
+[@Vndroid](https://github.com/Vndroid)
 
 
