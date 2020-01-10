@@ -353,6 +353,50 @@ class Access_Core
     }
 
     /**
+     * IPv6 地址转长字符串
+     *
+     * @param $ipv6
+     * @return string
+     */
+    function ip62long($ipv6)
+    {
+        $ip_n = inet_pton($ipv6);
+        $bits = 15; // 16 x 8 bit = 128bit
+        while ($bits >= 0) {
+            $bin = sprintf("%08b", (ord($ip_n[$bits])));
+            $ipv6long = $bin.$ipv6long;
+            $bits--;
+        }
+        return gmp_strval(gmp_init($ipv6long, 2), 10);
+    }
+
+    /**
+     * 长字符还原 IPv6
+     *
+     * @param $ipv6long
+     * @return false|string
+     */
+    function long2ip6($ipv6long)
+    {
+        $bin = gmp_strval(gmp_init($ipv6long, 10), 2);
+        if (strlen($bin) < 128) {
+            $pad = 128 - strlen($bin);
+            for ($i = 1; $i <= $pad; $i++) {
+                $bin = "0".$bin;
+            }
+        }
+        $bits = 0;
+        while ($bits <= 7) {
+            $bin_part = substr($bin, ($bits*16), 16);
+            $ipv6 .= dechex(bindec($bin_part)).":";
+            $bits++;
+        }
+        // compress
+
+        return inet_ntop(inet_pton(substr($ipv6, 0, -1)));
+    }
+
+    /**
      * 记录当前访问（管理员登录不会记录）
      *
      * @access public
@@ -370,7 +414,13 @@ class Access_Core
         if ($ip == null) {
             $ip = '0.0.0.0';
         }
-        $ip = bindec(decbin(ip2long($ip)));
+        // 判断 IP 类型
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            $ip = bindec(decbin(ip2long($ip)));
+
+        } else if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            $ip = $this->ip62long($ip);
+        }
 
         $entrypoint = $this->getEntryPoint();
         $referer = $this->request->getReferer();
@@ -468,6 +518,12 @@ class Access_Core
     }
     
     public function long2ip($long) {
+        // 判断是否为 IPv6 地址
+        $len = trim(strlen($long));
+        if($len ==38){
+            return $this->long2ip6($long);
+        }
+        // 判断是否为无效 IPv4 地址
         if ($long < 0 || $long > 4294967295) return false;
         $ip = "";
         for ($i=3;$i>=0;$i--) {
