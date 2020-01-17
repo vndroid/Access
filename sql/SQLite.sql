@@ -8,7 +8,7 @@ CREATE TABLE `typecho_access` (
   `url`               varchar(255)     default ''  ,
   `path`              varchar(255)     default ''  ,
   `query_string`      varchar(255)     default ''  ,
-  `ip`                int(32)          default '0' ,
+  `ip`                char(38)         default '0' ,
   `entrypoint`        varchar(255)     default ''  ,
   `entrypoint_domain` varchar(100)     default ''  ,
   `referer`           varchar(255)     default ''  ,

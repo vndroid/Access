@@ -8,7 +8,7 @@ CREATE TABLE `typecho_access` (
   `url`               varchar(255)     default ''              COMMENT '统一资源定位符',
   `path`              varchar(255)     default ''              COMMENT '路径',
   `query_string`      varchar(255)     default ''              COMMENT '请求参数',
-  `ip`                int(32) unsigned default '0'             COMMENT 'IP',
+  `ip`                char(38)         default '0'             COMMENT 'IP',
   `entrypoint`        varchar(255)     default ''              COMMENT '入口点',
   `entrypoint_domain` varchar(100)     default ''              COMMENT '入口域名',
   `referer`           varchar(255)     default ''              COMMENT 'Referer',

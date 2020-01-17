@@ -6,7 +6,7 @@ Record typecho system access logs and analytics.
 
 ## Intro
 
-Current Version: 2.3.1(200110) | [CHANGELOG](/CHANGELOG)
+Current Version: 2.3.2(200117) | [CHANGELOG](/CHANGELOG)
 
 Current Lauguage: [English](/README.md) | [Simplified Chinese](/README_CN.md)
 
