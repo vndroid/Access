@@ -341,6 +341,11 @@ class Access_UA {
 				$this->browserID = 'UCMobile';
 				$this->browserName = 'UC浏览器';
 				$this->browserVersion = $matches[2];
+            } elseif (preg_match('#MailMaster/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+                // Netease MailMaster Client
+                $this->browserID = 'MailMaster';
+                $this->browserName = '网易邮箱大师';
+                $this->browserVersion = $matches[1];
 			} elseif (preg_match('#Quark/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				// Quark Android / iOS
 				$this->browserID = 'Quark';
