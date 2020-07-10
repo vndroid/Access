@@ -6,20 +6,20 @@ Record typecho system access logs and analytics.
 
 ## Intro
 
-Current Version: 2.3.2(200117) | [CHANGELOG](/CHANGELOG)
+Current Version: 2.3.3(200710) | [CHANGELOG](/CHANGELOG)
 
 Current Lauguage: [English](/README.md) | [Simplified Chinese](/README_CN.md)
 
 ### Latest Update Description
 
+* Add [MailMaster](http://mail.163.com/dashi/) Support.
 * Add [Firefox Focus](https://play.google.com/store/apps/details?id=org.mozilla.focus) Support.
 * Add [Edge Android/iOS](https://www.microsoft.com/en-us/windows/microsoft-edge) Support.
-* Add [UC Turbo](https://play.google.com/store/apps/details?id=com.ucturbo) Support.
 * General bug fixes and performance improvements.
 
 ### Notice
 
-* This branch need to change the Database to `_access` (**REMOVE** the _log suffix), Example: `typecho.typecho_access` .
+* This branch need to change the Database to `_access` (**REMOVE** the _log suffix), Example: `typecho.typecho_access`.
 * When the plugin update, please disable the plugin before updating.
 * The plugin directory name must be 'Access'.
 
