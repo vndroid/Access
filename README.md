@@ -6,16 +6,16 @@ Record typecho system access logs and analytics.
 
 ## Intro
 
-Current Version: 2.3.3(200710) | [CHANGELOG](/CHANGELOG)
+Current Version: [CHANGELOG](/CHANGELOG)
 
-Current Lauguage: [English](/README.md) | [Simplified Chinese](/README_CN.md)
+Current Lauguage: **English** | [Simplified Chinese](/README_CN.md)
 
 ### Latest Update Description
 
-* Add [MailMaster](http://mail.163.com/dashi/) Support.
-* Add [Firefox Focus](https://play.google.com/store/apps/details?id=org.mozilla.focus) Support.
-* Add [Edge Android/iOS](https://www.microsoft.com/en-us/windows/microsoft-edge) Support.
-* General bug fixes and performance improvements.
+- Fix Chromium Style Error.
+- Add IPv6 Support.
+- Add [MailMaster](http://mail.163.com/dashi/) Support.
+- General bug fixes and performance improvements.
 
 ### Notice
 
