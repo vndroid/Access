@@ -5,7 +5,7 @@ require_once __DIR__ . '/Access_Bootstrap.php';
  *
  * @package Access
  * @author Kokororin
- * @version 2.3.3
+ * @version 2.3.4
  * @link https://github.com/Vndroid/Access
  */
 class Access_Plugin implements Typecho_Plugin_Interface
@@ -69,12 +69,12 @@ class Access_Plugin implements Typecho_Plugin_Interface
             'isDrop', array(
                 '0' => '否',
                 '1' => '是',
-            ), '0', '禁用时删除日志表', '请选择是否在禁用插件时，删除日志数据表');
+            ), '0', '彻底卸载', '在禁用插件时，是否同时删除（不可恢复，谨慎选择）历史数据。');
         $writeType = new Typecho_Widget_Helper_Form_Element_Radio(
             'writeType', array(
                 '0' => '前端',
                 '1' => '后端',
-            ), '1', '日志写入类型', '日志写入类型，若写入速度较慢可选择前端写入日志（若选择为前端方式，如果使用了 PJAX，请在 PJAX 相关事件中调用 window.Access.track() 方法）');
+            ), '1', '统计类型', '日志写入类型（若选择为前端方式，如果使用了 PJAX，请在 PJAX 相关事件中调用 window.Access.track() 方法），若写入速度较慢可选择前端写入日志。');
         $form->addInput($pageSize);
         $form->addInput($isDrop);
         $form->addInput($writeType);
