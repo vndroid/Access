@@ -276,6 +276,11 @@ class Access_UA {
 				$this->browserID = 'BaiduBrowser';
 				$this->browserName = '百度浏览器';
 				$this->browserVersion = $matches[1];
+			} elseif (preg_match('#MicroMessenger/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+				// WeChat inside Browser
+				$this->browserID = 'WeChat';
+				$this->browserName = 'WeChat';
+				$this->browserVersion = $matches[1];
 			} elseif (preg_match('#OPRGX/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
 				// Opera Gaming Browser PC
 				$this->browserID = 'Opera GX';
