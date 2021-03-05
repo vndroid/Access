@@ -10,6 +10,12 @@ Current Version: [CHANGELOG](/CHANGELOG)
 
 Current Lauguage: **English** | [Simplified Chinese](/README_CN.md)
 
+## Preview
+
+![VIEW1](/pictures/example1.png)
+
+![VIEW2](/pictures/example2.png)
+
 ### Latest Update Description
 
 - Fix Chromium Style Error.
