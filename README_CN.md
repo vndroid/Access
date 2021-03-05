@@ -4,11 +4,17 @@
 
 一款为 Typecho 设计的访问记录及统计插件。
 
-## 预览
+## 简介
 
 当前版本： [CHANGELOG](/CHANGELOG)
 
 当前语言： [英文](/README.md) | **简体中文**
+
+## 预览
+
+![VIEW1](/pictures/example1.png)
+
+![VIEW2](/pictures/example2.png)
 
 ### 最近更新
 
