@@ -259,8 +259,11 @@ class Access_UA {
                 $this->browserID = 'SE2';
                 $this->browserName = '搜狗浏览器 2';
                 $this->browserVersion = $matches[1];
+            } elseif (preg_match('#Mb2345Browser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+                $this->browserID = '2345Browser';
+                $this->browserName = '2345浏览器';
+                $this->browserVersion = $matches[1];
             } elseif (preg_match('#SogouMobileBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Sogou Browser Android
                 $this->browserID = 'SogouMobileBrowser';
                 $this->browserName = '搜狗浏览器';
                 $this->browserVersion = $matches[1];
