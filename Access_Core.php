@@ -113,7 +113,7 @@ class Access_Core
                 $version = $ua->getBrowserVersion();
             }
             if ($name == '') {
-                $row['display_name'] = _t('未知');
+                $row['display_name'] = _t('Unknown');
             } elseif ($version == '') {
                 $row['display_name'] = $name;
             } else {
