@@ -255,7 +255,7 @@ class Access_UA {
     private function parseBrowser() {
         if ($this->browserName === null) {
             if (preg_match('#SE 2([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Sogou Browser PC
+                // PC Sogou Browser
                 $this->browserID = 'SE2';
                 $this->browserName = '搜狗浏览器 2';
                 $this->browserVersion = $matches[1];
@@ -271,6 +271,10 @@ class Access_UA {
                 // BaiduApp Android / iOS
                 $this->browserID = 'BaiduBoxApp';
                 $this->browserName = '手机百度';
+                $this->browserVersion = $matches[1];
+            } elseif (preg_match('#LieBaoFast/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+                $this->browserID = 'LieBaoFast';
+                $this->browserName = '猎豹浏览器';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#baidubrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // Baidu Browser Android
@@ -315,7 +319,7 @@ class Access_UA {
             } elseif (preg_match('#(MQQBrowser|QQBrowser)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // QQ Browser Android / PC & macOS
                 $this->browserID = 'QQBrowser';
-                $this->browserName = 'QQ浏览器';
+                $this->browserName = 'QQBrowser';
                 $this->browserVersion = $matches[2];
             } elseif (preg_match('#QQ/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // MobileQQ Android
@@ -345,7 +349,7 @@ class Access_UA {
             } elseif (preg_match('#(UCBrowser|UBrowser|UCWEB)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // UCMobile Android / Symbian & BlackBerry and older version
                 $this->browserID = 'UCMobile';
-                $this->browserName = 'UC浏览器';
+                $this->browserName = 'UCBrowser';
                 $this->browserVersion = $matches[2];
             } elseif (preg_match('#MailMaster/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // Netease MailMaster Client
@@ -370,7 +374,7 @@ class Access_UA {
             } elseif (preg_match('#Maxthon( |\/)([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // Maxthon Android
                 $this->browserID = 'Maxthon';
-                $this->browserName = '遨游浏览器';
+                $this->browserName = 'Maxthon';
                 $this->browserVersion = $matches[2];
             } elseif (preg_match('#XiaoMi/MiuiBrowser/([0-9.]+)#i', $this->ua, $matches)) {
                 // MIUI Browser
