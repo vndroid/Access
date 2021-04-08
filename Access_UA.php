@@ -38,6 +38,7 @@ class Access_UA {
         'Heritrix',
         'Python-urllib',
         'Alexa (IA Archiver)',
+        'python-requests',
         'Ask',
         'Exabot',
         'Custo',
@@ -261,7 +262,7 @@ class Access_UA {
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#Mb2345Browser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 $this->browserID = '2345Browser';
-                $this->browserName = '2345浏览器';
+                $this->browserName = '2345Browser';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#SogouMobileBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 $this->browserID = 'SogouMobileBrowser';
