@@ -30,6 +30,7 @@ class Access_UA {
         'BaiDuSpider',
         'Voila',
         'Yandex bot',
+        'AppEngine-Google',
         'BSpider',
         'twiceler',
         'Sogou Spider',
