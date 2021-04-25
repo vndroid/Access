@@ -4,7 +4,7 @@ if (!defined('__ACCESS_PLUGIN_ROOT__')) {
 }
 
 class Access_UA {
-    private static $robots = array(
+    private static array $robots = array(
         'DuckDuckBot',              // DuckDuckGo
         'DuckDuckGo-Favicons-Bot',  // DuckDuckGo Favicons
         'gce-spider',               // Google App Engine Software
@@ -65,20 +65,20 @@ class Access_UA {
         'Scrapy',
     );
 
-    private $ua;
-    private $ual;
+    private string $ua;
+    private string $ual;
     
-    private $osID = null;
-    private $osName	= null;
-    private $osVersion = null;
+    private ?string $osID = null;
+    private ?string $osName	= null;
+    private ?string $osVersion = null;
     
-    private $robotID = null;
-    private $robotName = null;
-    private $robotVersion = null;
+    private ?string $robotID = null;
+    private ?string $robotName = null;
+    private ?string $robotVersion = null;
     
-    private $browserID = null;
-    private $browserName = null;
-    private $browserVersion = null;
+    private ?string $browserID = null;
+    private ?string $browserName = null;
+    private ?string $browserVersion = null;
 
     function __construct($ua) {
         $this->ua = $ua;
@@ -99,7 +99,8 @@ class Access_UA {
      * @access public
      * @return string
      */
-    public function getUA() {
+    public function getUA(): string
+    {
         return $this->ua;
     }
 
@@ -109,7 +110,8 @@ class Access_UA {
      * @access public
      * @return bool
      */
-    public function isRobot() {
+    public function isRobot(): bool
+    {
         if ($this->robotID === null) {
             if (!empty($this->ua)) {
                 if (preg_match('#([a-zA-Z0-9]+\s*(?:-?bot|spider|-?client))[ /v]*([0-9.]*)#i', $this->ua, $matches)) {
@@ -135,7 +137,8 @@ class Access_UA {
      * @access public
      * @return string
      */
-    public function getRobotID() {
+    public function getRobotID(): ?string
+    {
         return $this->isRobot() ? $this->robotID : '';
     }
 
@@ -145,7 +148,8 @@ class Access_UA {
      * @access public
      * @return string
      */
-    public function getRobotVersion() {
+    public function getRobotVersion(): ?string
+    {
         return $this->isRobot() ? $this->robotVersion : '';
     }
 
@@ -155,7 +159,8 @@ class Access_UA {
      * @access private
      * @return bool
      */
-    private function parseOS() {
+    private function parseOS(): bool
+    {
         if ($this->osID === null) {
             if (preg_match('/Windows NT 6.0/i', $this->ua)) {
                 $this->osID = $this->osName = 'Windows';
@@ -224,7 +229,8 @@ class Access_UA {
      * @access public
      * @return string
      */
-    public function getOSID() {
+    public function getOSID(): ?string
+    {
         return $this->parseOS() ? $this->osID : '';
     }
 
@@ -234,7 +240,8 @@ class Access_UA {
      * @access public
      * @return string
      */
-    public function getOSName() {
+    public function getOSName(): ?string
+    {
         return $this->parseOS() ? $this->osName : '';
     }
 
@@ -244,7 +251,8 @@ class Access_UA {
      * @access public
      * @return string
      */
-    public function getOSVersion() {
+    public function getOSVersion(): ?string
+    {
         return $this->parseOS() ? $this->osVersion : '';
     }
 
@@ -421,7 +429,8 @@ class Access_UA {
      * @access public
      * @return string
      */
-    public function getBrowserID() {
+    public function getBrowserID(): ?string
+    {
         return $this->parseBrowser() ? $this->browserID : '';
     }
 
@@ -431,7 +440,8 @@ class Access_UA {
      * @access public
      * @return string
      */
-    public function getBrowserName() {
+    public function getBrowserName(): ?string
+    {
         return $this->parseBrowser() ? $this->browserName : '';
     }
 
@@ -441,7 +451,8 @@ class Access_UA {
      * @access public
      * @return string
      */
-    public function getBrowserVersion() {
+    public function getBrowserVersion(): ?string
+    {
         return $this->parseBrowser() ? $this->browserVersion : '';
     }
 }
