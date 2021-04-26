@@ -262,7 +262,8 @@ class Access_UA {
      * @access private
      * @return bool
      */
-    private function parseBrowser() {
+    private function parseBrowser(): bool
+    {
         if ($this->browserName === null) {
             if (preg_match('#SE 2([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // PC Sogou Browser
