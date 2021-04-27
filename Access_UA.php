@@ -266,7 +266,7 @@ class Access_UA {
     {
         if ($this->browserName === null) {
             if (preg_match('#SE 2([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // PC Sogou Browser
+                // PC SoGou Browser
                 $this->browserID = 'SE2';
                 $this->browserName = '搜狗浏览器 2';
                 $this->browserVersion = $matches[1];
@@ -309,17 +309,17 @@ class Access_UA {
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#2345Explorer/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // 2345Explorer Browser PC
-                $this->browserID = '2345Explorer';
+                $this->browserID = '2345E';
                 $this->browserName = '2345Explorer';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#OPR/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // Opera Android / iOS
-                $this->browserID = 'Opera';
+                $this->browserID = 'OPR';
                 $this->browserName = 'Opera';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#OPT/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // Opera Touch Android / iOS
-                $this->browserID = 'Opera Touch';
+                $this->browserID = 'OPT';
                 $this->browserName = 'Opera Touch';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#Vivaldi/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
@@ -330,7 +330,7 @@ class Access_UA {
             } elseif (preg_match('#(MQQBrowser|QQBrowser)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // QQ Browser Android / PC & macOS
                 $this->browserID = 'QQBrowser';
-                $this->browserName = 'QQBrowser';
+                $this->browserName = 'QQ浏览器';
                 $this->browserVersion = $matches[2];
             } elseif (preg_match('#QQ/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // MobileQQ Android
@@ -357,14 +357,14 @@ class Access_UA {
                 $this->browserName = 'Yandex';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#UCTurbo/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // UC Turbo Google Play version
+                // Quark International Edition
                 $this->browserID = 'UCTurbo';
                 $this->browserName = 'UCTurbo';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#(UCBrowser|UBrowser|UCWEB)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // UCMobile Android / Symbian & BlackBerry and older version
-                $this->browserID = 'UCMobile';
-                $this->browserName = 'UCBrowser';
+                $this->browserID = 'UCBrowser';
+                $this->browserName = 'UC浏览器';
                 $this->browserVersion = $matches[2];
             } elseif (preg_match('#MailMaster/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // Netease MailMaster Client
