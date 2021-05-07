@@ -1,13 +1,13 @@
 /**
- * @license Highcharts JS v8.0.0 (2019-12-10)
+ * @license Highcharts JS v9.1.0 (2021-05-03)
  * @module highcharts/modules/data
  * @requires highcharts
  *
  * Data module
  *
- * (c) 2012-2019 Torstein Honsi
+ * (c) 2012-2021 Torstein Honsi
  *
  * License: www.highcharts.com/license
  */
 'use strict';
-import '../../modules/data.src.js';
+import '../../Extensions/Data.js';

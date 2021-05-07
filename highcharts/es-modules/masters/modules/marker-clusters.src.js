@@ -1,13 +1,13 @@
 /**
- * @license Highcharts JS v8.0.0 (2019-12-10)
+ * @license Highcharts JS v9.1.0 (2021-05-03)
  * @module highcharts/modules/marker-clusters
  * @requires highcharts
  *
  * Marker clusters module for Highcharts
  *
- * (c) 2010-2019 Wojciech Chmiel
+ * (c) 2010-2021 Wojciech Chmiel
  *
  * License: www.highcharts.com/license
  */
 'use strict';
-import '../../modules/marker-clusters.src.js';
+import '../../Extensions/MarkerClusters.js';

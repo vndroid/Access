@@ -1,13 +1,13 @@
 /**
- * @license Highcharts Gantt JS v8.0.0 (2019-12-10)
+ * @license Highcharts Gantt JS v9.1.0 (2021-05-03)
  * @module highcharts/modules/pathfinder
  * @requires highcharts
  *
  * Pathfinder
  *
- * (c) 2016-2019 Øystein Moseng
+ * (c) 2016-2021 Øystein Moseng
  *
  * License: www.highcharts.com/license
  */
 'use strict';
-import '../../parts-gantt/Pathfinder.js';
+import '../../Gantt/Pathfinder.js';

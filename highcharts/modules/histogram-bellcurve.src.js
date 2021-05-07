@@ -1,7 +1,7 @@
 /**
- * @license Highcharts JS v8.0.0 (2019-12-10)
+ * @license Highcharts JS v9.1.0 (2021-05-03)
  *
- * (c) 2010-2019 Highsoft AS
+ * (c) 2010-2021 Highsoft AS
  * Author: Sebastian Domas
  *
  * License: www.highcharts.com/license
@@ -27,14 +27,15 @@
             obj[path] = fn.apply(null, args);
         }
     }
-    _registerModule(_modules, 'mixins/derived-series.js', [_modules['parts/Globals.js'], _modules['parts/Utilities.js']], function (H, U) {
+    _registerModule(_modules, 'Mixins/DerivedSeries.js', [_modules['Core/Globals.js'], _modules['Core/Series/Series.js'], _modules['Core/Utilities.js']], function (H, Series, U) {
         /* *
          *
          *  !!!!!!! SOURCE GETS TRANSPILED BY TYPESCRIPT. EDIT TS FILE ONLY. !!!!!!!
          *
          * */
-        var defined = U.defined;
-        var Series = H.Series, addEvent = H.addEvent, noop = H.noop;
+        var noop = H.noop;
+        var addEvent = U.addEvent,
+            defined = U.defined;
         /* ************************************************************************** *
          *
          * DERIVED SERIES MIXIN
@@ -48,17 +49,18 @@
          * @mixin derivedSeriesMixin
          */
         var derivedSeriesMixin = {
-            hasDerivedData: true,
-            /* eslint-disable valid-jsdoc */
-            /**
-             * Initialise series
-             *
-             * @private
-             * @function derivedSeriesMixin.init
-             * @return {void}
-             */
-            init: function () {
-                Series.prototype.init.apply(this, arguments);
+                hasDerivedData: true,
+                /* eslint-disable valid-jsdoc */
+                /**
+                 * Initialise series
+                 *
+                 * @private
+                 * @function derivedSeriesMixin.init
+                 * @return {void}
+                 */
+                init: function () {
+                    Series.prototype.init.apply(this,
+            arguments);
                 this.initialised = false;
                 this.baseSeries = null;
                 this.eventRemovers = [];
@@ -84,9 +86,11 @@
              * @return {void}
              */
             setBaseSeries: function () {
-                var chart = this.chart, baseSeriesOptions = this.options.baseSeries, baseSeries = (defined(baseSeriesOptions) &&
-                    (chart.series[baseSeriesOptions] ||
-                        chart.get(baseSeriesOptions)));
+                var chart = this.chart,
+                    baseSeriesOptions = this.options.baseSeries,
+                    baseSeries = (defined(baseSeriesOptions) &&
+                        (chart.series[baseSeriesOptions] ||
+                            chart.get(baseSeriesOptions)));
                 this.baseSeries = baseSeries || null;
             },
             /**
@@ -97,7 +101,8 @@
              * @return {void}
              */
             addEvents: function () {
-                var derivedSeries = this, chartSeriesLinked;
+                var derivedSeries = this,
+                    chartSeriesLinked;
                 chartSeriesLinked = addEvent(this.chart, 'afterLinkSeries', function () {
                     derivedSeries.setBaseSeries();
                     if (derivedSeries.baseSeries && !derivedSeries.initialised) {
@@ -117,7 +122,9 @@
              * @return {void}
              */
             addBaseSeriesEvents: function () {
-                var derivedSeries = this, updatedDataRemover, destroyRemover;
+                var derivedSeries = this,
+                    updatedDataRemover,
+                    destroyRemover;
                 updatedDataRemover = addEvent(derivedSeries.baseSeries, 'updatedData', function () {
                     derivedSeries.setDerivedData();
                 });
@@ -144,10 +151,10 @@
 
         return derivedSeriesMixin;
     });
-    _registerModule(_modules, 'modules/histogram.src.js', [_modules['parts/Globals.js'], _modules['parts/Utilities.js'], _modules['mixins/derived-series.js']], function (H, U, derivedSeriesMixin) {
+    _registerModule(_modules, 'Series/Histogram/HistogramSeries.js', [_modules['Mixins/DerivedSeries.js'], _modules['Core/Series/SeriesRegistry.js'], _modules['Core/Utilities.js']], function (DerivedSeriesMixin, SeriesRegistry, U) {
         /* *
          *
-         *  Copyright (c) 2010-2017 Highsoft AS
+         *  Copyright (c) 2010-2021 Highsoft AS
          *  Author: Sebastian Domas
          *
          *  License: www.highcharts.com/license
@@ -155,8 +162,30 @@
          *  !!!!!!! SOURCE GETS TRANSPILED BY TYPESCRIPT. EDIT TS FILE ONLY. !!!!!!!
          *
          * */
-        var arrayMax = U.arrayMax, arrayMin = U.arrayMin, correctFloat = U.correctFloat, isNumber = U.isNumber, objectEach = U.objectEach;
-        var seriesType = H.seriesType, merge = H.merge;
+        var __extends = (this && this.__extends) || (function () {
+                var extendStatics = function (d,
+            b) {
+                    extendStatics = Object.setPrototypeOf ||
+                        ({ __proto__: [] } instanceof Array && function (d,
+            b) { d.__proto__ = b; }) ||
+                        function (d,
+            b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+                return extendStatics(d, b);
+            };
+            return function (d, b) {
+                extendStatics(d, b);
+                function __() { this.constructor = d; }
+                d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+            };
+        })();
+        var ColumnSeries = SeriesRegistry.seriesTypes.column;
+        var arrayMax = U.arrayMax,
+            arrayMin = U.arrayMin,
+            correctFloat = U.correctFloat,
+            extend = U.extend,
+            isNumber = U.isNumber,
+            merge = U.merge,
+            objectEach = U.objectEach;
         /* ************************************************************************** *
          *  HISTOGRAM
          * ************************************************************************** */
@@ -165,8 +194,8 @@
          * base series
          **/
         var binsNumberFormulas = {
-            'square-root': function (baseSeries) {
-                return Math.ceil(Math.sqrt(baseSeries.options.data.length));
+                'square-root': function (baseSeries) {
+                    return Math.ceil(Math.sqrt(baseSeries.options.data.length));
             },
             'sturges': function (baseSeries) {
                 return Math.ceil(Math.log(baseSeries.options.data.length) * Math.LOG2E);
@@ -190,6 +219,11 @@
                 return bins[--i];
             };
         }
+        /* *
+         *
+         *  Class
+         *
+         * */
         /**
          * Histogram class
          * @private
@@ -197,71 +231,56 @@
          * @name Highcharts.seriesTypes.histogram
          * @augments Highcharts.Series
          */
-        seriesType('histogram', 'column', 
-        /**
-         * A histogram is a column series which represents the distribution of the
-         * data set in the base series. Histogram splits data into bins and shows
-         * their frequencies.
-         *
-         * @sample {highcharts} highcharts/demo/histogram/
-         *         Histogram
-         *
-         * @extends      plotOptions.column
-         * @excluding    boostThreshold, dragDrop, pointInterval, pointIntervalUnit,
-         *               stacking
-         * @product      highcharts
-         * @since        6.0.0
-         * @requires     modules/histogram
-         * @optionparent plotOptions.histogram
-         */
-        {
-            /**
-             * A preferable number of bins. It is a suggestion, so a histogram may
-             * have a different number of bins. By default it is set to the square
-             * root of the base series' data length. Available options are:
-             * `square-root`, `sturges`, `rice`. You can also define a function
-             * which takes a `baseSeries` as a parameter and should return a
-             * positive integer.
-             *
-             * @type {"square-root"|"sturges"|"rice"|number|function}
-             */
-            binsNumber: 'square-root',
-            /**
-             * Width of each bin. By default the bin's width is calculated as
-             * `(max - min) / number of bins`. This option takes precedence over
-             * [binsNumber](#plotOptions.histogram.binsNumber).
-             *
-             * @type {number}
-             */
-            binWidth: void 0,
-            pointPadding: 0,
-            groupPadding: 0,
-            grouping: false,
-            pointPlacement: 'between',
-            tooltip: {
-                headerFormat: '',
-                pointFormat: ('<span style="font-size: 10px">{point.x} - {point.x2}' +
-                    '</span><br/>' +
-                    '<span style="color:{point.color}">\u25CF</span>' +
-                    ' {series.name} <b>{point.y}</b><br/>')
+        var HistogramSeries = /** @class */ (function (_super) {
+                __extends(HistogramSeries, _super);
+            function HistogramSeries() {
+                /* *
+                 *
+                 *  Static Properties
+                 *
+                 * */
+                var _this = _super !== null && _super.apply(this,
+                    arguments) || this;
+                _this.data = void 0;
+                _this.options = void 0;
+                _this.points = void 0;
+                _this.userOptions = void 0;
+                return _this;
+                /* eslint-enable valid-jsdoc */
             }
-        }, merge(derivedSeriesMixin, {
-            setDerivedData: function () {
-                var yData = this.baseSeries.yData;
-                if (!yData.length) {
-                    return;
-                }
-                var data = this.derivedData(yData, this.binsNumber(), this.options.binWidth);
-                this.setData(data, false);
-            },
-            derivedData: function (baseData, binsNumber, binWidth) {
-                var series = this, max = arrayMax(baseData), 
-                // Float correction needed, because first frequency value is not
-                // corrected when generating frequencies (within for loop).
-                min = correctFloat(arrayMin(baseData)), frequencies = [], bins = {}, data = [], x, fitToBin;
-                binWidth = series.binWidth = series.options.pointRange = (correctFloat(isNumber(binWidth) ?
+            /* *
+             *
+             *  Functions
+             *
+             * */
+            /* eslint-disable valid-jsdoc */
+            HistogramSeries.prototype.binsNumber = function () {
+                var binsNumberOption = this.options.binsNumber;
+                var binsNumber = binsNumberFormulas[binsNumberOption] ||
+                        // #7457
+                        (typeof binsNumberOption === 'function' && binsNumberOption);
+                return Math.ceil((binsNumber && binsNumber(this.baseSeries)) ||
+                    (isNumber(binsNumberOption) ?
+                        binsNumberOption :
+                        binsNumberFormulas['square-root'](this.baseSeries)));
+            };
+            HistogramSeries.prototype.derivedData = function (baseData, binsNumber, binWidth) {
+                var series = this,
+                    max = correctFloat(arrayMax(baseData)), 
+                    // Float correction needed, because first frequency value is not
+                    // corrected when generating frequencies (within for loop).
+                    min = correctFloat(arrayMin(baseData)),
+                    frequencies = [],
+                    bins = {},
+                    data = [],
+                    x,
+                    fitToBin;
+                binWidth = series.binWidth = (correctFloat(isNumber(binWidth) ?
                     (binWidth || 1) :
                     (max - min) / binsNumber));
+                // #12077 negative pointRange causes wrong calculations,
+                // browser hanging.
+                series.options.pointRange = Math.max(binWidth, 0);
                 // If binWidth is 0 then max and min are equaled,
                 // increment the x with some positive value to quit the loop
                 for (x = min; 
@@ -272,13 +291,17 @@
                 x < max &&
                     (series.userOptions.binWidth ||
                         correctFloat(max - x) >= binWidth ||
-                        correctFloat(min + (frequencies.length * binWidth) - x) <= 0); x = correctFloat(x + binWidth)) {
+                        // #13069 - Every add and subtract operation should
+                        // be corrected, due to general problems with
+                        // operations on float numbers in JS.
+                        correctFloat(correctFloat(min + (frequencies.length * binWidth)) -
+                            x) <= 0); x = correctFloat(x + binWidth)) {
                     frequencies.push(x);
                     bins[x] = 0;
                 }
                 if (bins[min] !== 0) {
-                    frequencies.push(correctFloat(min));
-                    bins[correctFloat(min)] = 0;
+                    frequencies.push(min);
+                    bins[min] = 0;
                 }
                 fitToBin = fitToBinLeftClosed(frequencies.map(function (elem) {
                     return parseFloat(elem);
@@ -297,25 +320,95 @@
                 data.sort(function (a, b) {
                     return a.x - b.x;
                 });
+                data[data.length - 1].x2 = max;
                 return data;
-            },
-            binsNumber: function () {
-                var binsNumberOption = this.options.binsNumber;
-                var binsNumber = binsNumberFormulas[binsNumberOption] ||
-                    // #7457
-                    (typeof binsNumberOption === 'function' && binsNumberOption);
-                return Math.ceil((binsNumber && binsNumber(this.baseSeries)) ||
-                    (isNumber(binsNumberOption) ?
-                        binsNumberOption :
-                        binsNumberFormulas['square-root'](this.baseSeries)));
-            }
-        }));
+            };
+            HistogramSeries.prototype.setDerivedData = function () {
+                var yData = this.baseSeries.yData;
+                if (!yData.length) {
+                    this.setData([]);
+                    return;
+                }
+                var data = this.derivedData(yData,
+                    this.binsNumber(),
+                    this.options.binWidth);
+                this.setData(data, false);
+            };
+            /**
+             * A histogram is a column series which represents the distribution of the
+             * data set in the base series. Histogram splits data into bins and shows
+             * their frequencies.
+             *
+             * @sample {highcharts} highcharts/demo/histogram/
+             *         Histogram
+             *
+             * @extends      plotOptions.column
+             * @excluding    boostThreshold, dragDrop, pointInterval, pointIntervalUnit,
+             *               stacking, boostBlending
+             * @product      highcharts
+             * @since        6.0.0
+             * @requires     modules/histogram
+             * @optionparent plotOptions.histogram
+             */
+            HistogramSeries.defaultOptions = merge(ColumnSeries.defaultOptions, {
+                /**
+                 * A preferable number of bins. It is a suggestion, so a histogram may
+                 * have a different number of bins. By default it is set to the square
+                 * root of the base series' data length. Available options are:
+                 * `square-root`, `sturges`, `rice`. You can also define a function
+                 * which takes a `baseSeries` as a parameter and should return a
+                 * positive integer.
+                 *
+                 * @type {"square-root"|"sturges"|"rice"|number|function}
+                 */
+                binsNumber: 'square-root',
+                /**
+                 * Width of each bin. By default the bin's width is calculated as
+                 * `(max - min) / number of bins`. This option takes precedence over
+                 * [binsNumber](#plotOptions.histogram.binsNumber).
+                 *
+                 * @type {number}
+                 */
+                binWidth: void 0,
+                pointPadding: 0,
+                groupPadding: 0,
+                grouping: false,
+                pointPlacement: 'between',
+                tooltip: {
+                    headerFormat: '',
+                    pointFormat: ('<span style="font-size: 10px">{point.x} - {point.x2}' +
+                        '</span><br/>' +
+                        '<span style="color:{point.color}">\u25CF</span>' +
+                        ' {series.name} <b>{point.y}</b><br/>')
+                }
+            });
+            return HistogramSeries;
+        }(ColumnSeries));
+        extend(HistogramSeries.prototype, {
+            addBaseSeriesEvents: DerivedSeriesMixin.addBaseSeriesEvents,
+            addEvents: DerivedSeriesMixin.addEvents,
+            destroy: DerivedSeriesMixin.destroy,
+            hasDerivedData: DerivedSeriesMixin.hasDerivedData,
+            init: DerivedSeriesMixin.init,
+            setBaseSeries: DerivedSeriesMixin.setBaseSeries
+        });
+        SeriesRegistry.registerSeriesType('histogram', HistogramSeries);
+        /* *
+         *
+         *  Default Export
+         *
+         * */
+        /* *
+         *
+         *  API Options
+         *
+         * */
         /**
          * A `histogram` series. If the [type](#series.histogram.type) option is not
          * specified, it is inherited from [chart.type](#chart.type).
          *
          * @extends   series,plotOptions.histogram
-         * @excluding data, dataParser, dataURL
+         * @excluding data, dataParser, dataURL, boostThreshold, boostBlending
          * @product   highcharts
          * @since     6.0.0
          * @requires  modules/histogram
@@ -330,11 +423,12 @@
          */
         ''; // adds doclets above to transpiled file
 
+        return HistogramSeries;
     });
-    _registerModule(_modules, 'modules/bellcurve.src.js', [_modules['parts/Globals.js'], _modules['parts/Utilities.js'], _modules['mixins/derived-series.js']], function (H, U, derivedSeriesMixin) {
+    _registerModule(_modules, 'Series/Bellcurve/BellcurveSeries.js', [_modules['Mixins/DerivedSeries.js'], _modules['Core/Series/SeriesRegistry.js'], _modules['Core/Utilities.js']], function (DerivedSeriesMixin, SeriesRegistry, U) {
         /* *
          *
-         *  (c) 2010-2019 Highsoft AS
+         *  (c) 2010-2021 Highsoft AS
          *
          *  Author: Sebastian Domas
          *
@@ -343,42 +437,27 @@
          *  !!!!!!! SOURCE GETS TRANSPILED BY TYPESCRIPT. EDIT TS FILE ONLY. !!!!!!!
          *
          * */
-        var correctFloat = U.correctFloat, isNumber = U.isNumber;
-        var seriesType = H.seriesType, merge = H.merge;
-        /* ************************************************************************** *
-         *  BELL CURVE                                                                *
-         * ************************************************************************** */
-        /* eslint-disable valid-jsdoc */
-        /**
-         * @private
-         */
-        function mean(data) {
-            var length = data.length, sum = data.reduce(function (sum, value) {
-                return (sum += value);
-            }, 0);
-            return length > 0 && sum / length;
-        }
-        /**
-         * @private
-         */
-        function standardDeviation(data, average) {
-            var len = data.length, sum;
-            average = isNumber(average) ? average : mean(data);
-            sum = data.reduce(function (sum, value) {
-                var diff = value - average;
-                return (sum += diff * diff);
-            }, 0);
-            return len > 1 && Math.sqrt(sum / (len - 1));
-        }
-        /**
-         * @private
-         */
-        function normalDensity(x, mean, standardDeviation) {
-            var translation = x - mean;
-            return Math.exp(-(translation * translation) /
-                (2 * standardDeviation * standardDeviation)) / (standardDeviation * Math.sqrt(2 * Math.PI));
-        }
-        /* eslint-enable valid-jsdoc */
+        var __extends = (this && this.__extends) || (function () {
+                var extendStatics = function (d,
+            b) {
+                    extendStatics = Object.setPrototypeOf ||
+                        ({ __proto__: [] } instanceof Array && function (d,
+            b) { d.__proto__ = b; }) ||
+                        function (d,
+            b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+                return extendStatics(d, b);
+            };
+            return function (d, b) {
+                extendStatics(d, b);
+                function __() { this.constructor = d; }
+                d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+            };
+        })();
+        var AreaSplineSeries = SeriesRegistry.seriesTypes.areaspline;
+        var correctFloat = U.correctFloat,
+            extend = U.extend,
+            isNumber = U.isNumber,
+            merge = U.merge;
         /**
          * Bell curve class
          *
@@ -388,68 +467,178 @@
          *
          * @augments Highcharts.Series
          */
-        seriesType('bellcurve', 'areaspline'
-        /**
-         * A bell curve is an areaspline series which represents the probability
-         * density function of the normal distribution. It calculates mean and
-         * standard deviation of the base series data and plots the curve according
-         * to the calculated parameters.
-         *
-         * @sample {highcharts} highcharts/demo/bellcurve/
-         *         Bell curve
-         *
-         * @extends      plotOptions.areaspline
-         * @since        6.0.0
-         * @product      highcharts
-         * @excluding    boostThreshold, connectNulls, dragDrop, stacking,
-         *               pointInterval, pointIntervalUnit
-         * @requires     modules/bellcurve
-         * @optionparent plotOptions.bellcurve
-         */
-        , {
-            /**
-             * This option allows to define the length of the bell curve. A unit of
-             * the length of the bell curve is standard deviation.
-             *
-             * @sample highcharts/plotoptions/bellcurve-intervals-pointsininterval
-             *         Intervals and points in interval
-             */
-            intervals: 3,
-            /**
-             * Defines how many points should be plotted within 1 interval. See
-             * `plotOptions.bellcurve.intervals`.
-             *
-             * @sample highcharts/plotoptions/bellcurve-intervals-pointsininterval
-             *         Intervals and points in interval
-             */
-            pointsInInterval: 3,
-            marker: {
-                enabled: false
+        var BellcurveSeries = /** @class */ (function (_super) {
+                __extends(BellcurveSeries, _super);
+            function BellcurveSeries() {
+                /* *
+                 *
+                 *  Static Properties
+                 *
+                 * */
+                var _this = _super !== null && _super.apply(this,
+                    arguments) || this;
+                /* eslint-enable valid-jsdoc */
+                /* *
+                 *
+                 *  Properties
+                 *
+                 * */
+                _this.data = void 0;
+                _this.options = void 0;
+                _this.points = void 0;
+                return _this;
+                /* eslint-enable valid-jsdoc */
             }
-        }, merge(derivedSeriesMixin, {
-            setMean: function () {
-                this.mean = correctFloat(mean(this.baseSeries.yData));
-            },
-            setStandardDeviation: function () {
-                this.standardDeviation = correctFloat(standardDeviation(this.baseSeries.yData, this.mean));
-            },
-            setDerivedData: function () {
+            /* *
+             *
+             *  Static Functions
+             *
+             * */
+            /* eslint-disable valid-jsdoc */
+            /**
+             * @private
+             */
+            BellcurveSeries.mean = function (data) {
+                var length = data.length,
+                    sum = data.reduce(function (sum,
+                    value) {
+                        return (sum += value);
+                }, 0);
+                return length > 0 && sum / length;
+            };
+            /**
+             * @private
+             */
+            BellcurveSeries.standardDeviation = function (data, average) {
+                var len = data.length,
+                    sum;
+                average = isNumber(average) ? average : BellcurveSeries.mean(data);
+                sum = data.reduce(function (sum, value) {
+                    var diff = value - average;
+                    return (sum += diff * diff);
+                }, 0);
+                return len > 1 && Math.sqrt(sum / (len - 1));
+            };
+            /**
+             * @private
+             */
+            BellcurveSeries.normalDensity = function (x, mean, standardDeviation) {
+                var translation = x - mean;
+                return Math.exp(-(translation * translation) /
+                    (2 * standardDeviation * standardDeviation)) / (standardDeviation * Math.sqrt(2 * Math.PI));
+            };
+            /* *
+             *
+             *  Functions
+             *
+             * */
+            /* eslint-disable valid-jsdoc */
+            BellcurveSeries.prototype.derivedData = function (mean, standardDeviation) {
+                var intervals = this.options.intervals,
+                    pointsInInterval = this.options.pointsInInterval,
+                    x = mean - intervals * standardDeviation,
+                    stop = intervals * pointsInInterval * 2 + 1,
+                    increment = standardDeviation / pointsInInterval,
+                    data = [],
+                    i;
+                for (i = 0; i < stop; i++) {
+                    data.push([x, BellcurveSeries.normalDensity(x, mean, standardDeviation)]);
+                    x += increment;
+                }
+                return data;
+            };
+            BellcurveSeries.prototype.setDerivedData = function () {
                 if (this.baseSeries.yData.length > 1) {
                     this.setMean();
                     this.setStandardDeviation();
                     this.setData(this.derivedData(this.mean, this.standardDeviation), false);
                 }
                 return (void 0);
-            },
-            derivedData: function (mean, standardDeviation) {
-                var intervals = this.options.intervals, pointsInInterval = this.options.pointsInInterval, x = mean - intervals * standardDeviation, stop = intervals * pointsInInterval * 2 + 1, increment = standardDeviation / pointsInInterval, data = [], i;
-                for (i = 0; i < stop; i++) {
-                    data.push([x, normalDensity(x, mean, standardDeviation)]);
-                    x += increment;
+            };
+            BellcurveSeries.prototype.setMean = function () {
+                this.mean = correctFloat(BellcurveSeries.mean(this.baseSeries.yData));
+            };
+            BellcurveSeries.prototype.setStandardDeviation = function () {
+                this.standardDeviation = correctFloat(BellcurveSeries.standardDeviation(this.baseSeries.yData, this.mean));
+            };
+            /**
+             * A bell curve is an areaspline series which represents the probability
+             * density function of the normal distribution. It calculates mean and
+             * standard deviation of the base series data and plots the curve according
+             * to the calculated parameters.
+             *
+             * @sample {highcharts} highcharts/demo/bellcurve/
+             *         Bell curve
+             *
+             * @extends      plotOptions.areaspline
+             * @since        6.0.0
+             * @product      highcharts
+             * @excluding    boostThreshold, connectNulls, dragDrop, stacking,
+             *               pointInterval, pointIntervalUnit
+             * @requires     modules/bellcurve
+             * @optionparent plotOptions.bellcurve
+             */
+            BellcurveSeries.defaultOptions = merge(AreaSplineSeries.defaultOptions, {
+                /**
+                 * @see [fillColor](#plotOptions.bellcurve.fillColor)
+                 * @see [fillOpacity](#plotOptions.bellcurve.fillOpacity)
+                 *
+                 * @apioption plotOptions.bellcurve.color
+                 */
+                /**
+                 * @see [color](#plotOptions.bellcurve.color)
+                 * @see [fillOpacity](#plotOptions.bellcurve.fillOpacity)
+                 *
+                 * @apioption plotOptions.bellcurve.fillColor
+                 */
+                /**
+                 * @see [color](#plotOptions.bellcurve.color)
+                 * @see [fillColor](#plotOptions.bellcurve.fillColor)
+                 *
+                 * @default   {highcharts} 0.75
+                 * @default   {highstock} 0.75
+                 * @apioption plotOptions.bellcurve.fillOpacity
+                 */
+                /**
+                 * This option allows to define the length of the bell curve. A unit of
+                 * the length of the bell curve is standard deviation.
+                 *
+                 * @sample highcharts/plotoptions/bellcurve-intervals-pointsininterval
+                 *         Intervals and points in interval
+                 */
+                intervals: 3,
+                /**
+                 * Defines how many points should be plotted within 1 interval. See
+                 * `plotOptions.bellcurve.intervals`.
+                 *
+                 * @sample highcharts/plotoptions/bellcurve-intervals-pointsininterval
+                 *         Intervals and points in interval
+                 */
+                pointsInInterval: 3,
+                marker: {
+                    enabled: false
                 }
-                return data;
-            }
-        }));
+            });
+            return BellcurveSeries;
+        }(AreaSplineSeries));
+        extend(BellcurveSeries.prototype, {
+            addBaseSeriesEvents: DerivedSeriesMixin.addBaseSeriesEvents,
+            addEvents: DerivedSeriesMixin.addEvents,
+            destroy: DerivedSeriesMixin.destroy,
+            init: DerivedSeriesMixin.init,
+            setBaseSeries: DerivedSeriesMixin.setBaseSeries
+        });
+        SeriesRegistry.registerSeriesType('bellcurve', BellcurveSeries);
+        /* *
+         *
+         *  Default Export
+         *
+         * */
+        /* *
+         *
+         *  API Options
+         *
+         * */
         /**
          * A `bellcurve` series. If the [type](#series.bellcurve.type) option is not
          * specified, it is inherited from [chart.type](#chart.type).
@@ -462,7 +651,7 @@
          * @extends   series,plotOptions.bellcurve
          * @since     6.0.0
          * @product   highcharts
-         * @excluding dataParser, dataURL, data
+         * @excluding dataParser, dataURL, data, boostThreshold, boostBlending
          * @requires  modules/bellcurve
          * @apioption series.bellcurve
          */
@@ -473,8 +662,29 @@
          * @type      {number|string}
          * @apioption series.bellcurve.baseSeries
          */
+        /**
+         * @see [fillColor](#series.bellcurve.fillColor)
+         * @see [fillOpacity](#series.bellcurve.fillOpacity)
+         *
+         * @apioption series.bellcurve.color
+         */
+        /**
+         * @see [color](#series.bellcurve.color)
+         * @see [fillOpacity](#series.bellcurve.fillOpacity)
+         *
+         * @apioption series.bellcurve.fillColor
+         */
+        /**
+         * @see [color](#series.bellcurve.color)
+         * @see [fillColor](#series.bellcurve.fillColor)
+         *
+         * @default   {highcharts} 0.75
+         * @default   {highstock} 0.75
+         * @apioption series.bellcurve.fillOpacity
+         */
         ''; // adds doclets above to transpiled file
 
+        return BellcurveSeries;
     });
     _registerModule(_modules, 'masters/modules/histogram-bellcurve.src.js', [], function () {
 

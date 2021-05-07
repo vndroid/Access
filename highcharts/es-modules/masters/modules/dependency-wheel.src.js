@@ -1,14 +1,14 @@
 /**
- * @license Highcharts JS v8.0.0 (2019-12-10)
+ * @license Highcharts JS v9.1.0 (2021-05-03)
  * @module highcharts/modules/dependency-wheel
  * @requires highcharts
  * @requires highcharts/modules/sankey
  *
  * Dependency wheel module
  *
- * (c) 2010-2018 Torstein Honsi
+ * (c) 2010-2021 Torstein Honsi
  *
  * License: www.highcharts.com/license
  */
 'use strict';
-import '../../modules/dependency-wheel.src.js';
+import '../../Series/DependencyWheel/DependencyWheelSeries.js';

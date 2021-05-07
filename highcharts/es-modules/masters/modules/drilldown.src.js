@@ -1,5 +1,5 @@
 /**
- * @license Highcharts JS v8.0.0 (2019-12-10)
+ * @license Highcharts JS v9.1.0 (2021-05-03)
  * @module highcharts/modules/drilldown
  * @requires highcharts
  *
@@ -10,4 +10,4 @@
  *
  */
 'use strict';
-import '../../modules/drilldown.src.js';
+import '../../Extensions/Drilldown.js';
