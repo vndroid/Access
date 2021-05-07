@@ -3,11 +3,13 @@
  *  !!!!!!! SOURCE GETS TRANSPILED BY TYPESCRIPT. EDIT TS FILE ONLY. !!!!!!!
  *
  * */
-import H from '../parts/Globals.js';
-import U from '../parts/Utilities.js';
-var defined = U.defined, extend = U.extend, pick = U.pick;
-var Point = H.Point;
-H.NodesMixin = {
+'use strict';
+import H from '../Core/Globals.js';
+import Point from '../Core/Series/Point.js';
+import Series from '../Core/Series/Series.js';
+import U from '../Core/Utilities.js';
+var defined = U.defined, extend = U.extend, find = U.find, pick = U.pick;
+var NodesMixin = H.NodesMixin = {
     /* eslint-disable valid-jsdoc */
     /**
      * Create a single node that holds information on incoming and outgoing
@@ -19,7 +21,7 @@ H.NodesMixin = {
          * @private
          */
         function findById(nodes, id) {
-            return H.find(nodes, function (node) {
+            return find(nodes, function (node) {
                 return node.id === id;
             });
         }
@@ -35,7 +37,7 @@ H.NodesMixin = {
             node.linksTo = [];
             node.linksFrom = [];
             node.formatPrefix = 'node';
-            node.name = node.name || node.options.id; // for use in formats
+            node.name = node.name || node.options.id || ''; // for use in formats
             // Mass is used in networkgraph:
             node.mass = pick(
             // Node:
@@ -93,7 +95,7 @@ H.NodesMixin = {
      */
     generatePoints: function () {
         var chart = this.chart, nodeLookup = {};
-        H.Series.prototype.generatePoints.call(this);
+        Series.prototype.generatePoints.call(this);
         if (!this.nodes) {
             this.nodes = []; // List of Point-like node items
         }
@@ -141,14 +143,14 @@ H.NodesMixin = {
             });
             this.nodes.length = 0;
         }
-        H.Series.prototype.setData.apply(this, arguments);
+        Series.prototype.setData.apply(this, arguments);
     },
     // Destroy alll nodes and links
     destroy: function () {
         // Nodes must also be destroyed (#8682, #9300)
         this.data = []
             .concat(this.points || [], this.nodes);
-        return H.Series.prototype.destroy.apply(this, arguments);
+        return Series.prototype.destroy.apply(this, arguments);
     },
     /**
      * When hovering node, highlight all connected links. When hovering a link,
@@ -159,13 +161,13 @@ H.NodesMixin = {
             [this.fromNode, this.toNode];
         if (state !== 'select') {
             others.forEach(function (linkOrNode) {
-                if (linkOrNode.series) {
+                if (linkOrNode && linkOrNode.series) {
                     Point.prototype.setState.apply(linkOrNode, args);
                     if (!linkOrNode.isNode) {
                         if (linkOrNode.fromNode.graphic) {
                             Point.prototype.setState.apply(linkOrNode.fromNode, args);
                         }
-                        if (linkOrNode.toNode.graphic) {
+                        if (linkOrNode.toNode && linkOrNode.toNode.graphic) {
                             Point.prototype.setState.apply(linkOrNode.toNode, args);
                         }
                     }
@@ -176,3 +178,4 @@ H.NodesMixin = {
     }
     /* eslint-enable valid-jsdoc */
 };
+export default NodesMixin;

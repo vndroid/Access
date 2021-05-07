@@ -1,13 +1,13 @@
 /**
- * @license Highcharts JS v8.0.0 (2019-12-10)
+ * @license Highcharts JS v9.1.0 (2021-05-03)
  * Organization chart series type
  * @module highcharts/modules/organization
  * @requires highcharts
  * @requires highcharts/modules/sankey
  *
- * (c) 2019-2019 Torstein Honsi
+ * (c) 2019-2021 Torstein Honsi
  *
  * License: www.highcharts.com/license
  */
 'use strict';
-import '../../modules/organization.src.js';
+import '../../Series/Organization/OrganizationSeries.js';

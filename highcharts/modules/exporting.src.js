@@ -1,9 +1,9 @@
 /**
- * @license Highcharts JS v8.0.0 (2019-12-10)
+ * @license Highcharts JS v9.1.0 (2021-05-03)
  *
  * Exporting module
  *
- * (c) 2010-2019 Torstein Honsi
+ * (c) 2010-2021 Torstein Honsi
  *
  * License: www.highcharts.com/license
  */
@@ -28,69 +28,255 @@
             obj[path] = fn.apply(null, args);
         }
     }
-    _registerModule(_modules, 'modules/full-screen.src.js', [_modules['parts/Globals.js']], function (H) {
+    _registerModule(_modules, 'Extensions/FullScreen.js', [_modules['Core/Chart/Chart.js'], _modules['Core/Globals.js'], _modules['Core/Renderer/HTML/AST.js'], _modules['Core/Utilities.js']], function (Chart, H, AST, U) {
         /* *
+         * (c) 2009-2021 Rafal Sebestjanski
          *
-         *  (c) 2009-2019 Sebastian Bochann
+         * Full screen for Highcharts
          *
-         *  Full screen for Highcharts
-         *
-         *  License: www.highcharts.com/license
-         *
-         *  !!!!!!! SOURCE GETS TRANSPILED BY TYPESCRIPT. EDIT TS FILE ONLY. !!!!!!!
-         *
-         * */
-        /* eslint-disable no-invalid-this, valid-jsdoc */
+         * License: www.highcharts.com/license
+         */
+        var doc = H.doc;
+        var addEvent = U.addEvent;
         /**
-         * The FullScreen class.
-         * The module allows user to enable full screen mode in StockTools.
+         * The module allows user to enable display chart in full screen mode.
+         * Used in StockTools too.
          * Based on default solutions in browsers.
          *
-         * @private
-         * @class
-         * @name Highcharts.FullScreen
-         *
-         * @param {Highcharts.HTMLDOMElement} container
-         *        Chart container
          */
-        var FullScreen = H.FullScreen = function (container) {
-            this.init(container.parentNode);
-        };
-        FullScreen.prototype = {
-            /**
-             * Init function
-             * @private
-             * @param {Highcharts.HTMLDOMElement} container
-             *        Chart container's parent
-             * @return {void}
-             */
-            init: function (container) {
-                var promise;
-                if (container.requestFullscreen) {
-                    promise = container.requestFullscreen();
-                }
-                else if (container.mozRequestFullScreen) {
-                    promise = container.mozRequestFullScreen();
-                }
-                else if (container.webkitRequestFullscreen) {
-                    promise = container.webkitRequestFullscreen();
-                }
-                else if (container.msRequestFullscreen) {
-                    promise = container.msRequestFullscreen();
-                }
-                if (promise) {
-                    promise['catch'](function () {
-                        alert('Full screen is not supported inside a frame'); // eslint-disable-line no-alert
-                    });
+        /* eslint-disable no-invalid-this, valid-jsdoc */
+        /**
+         * Handles displaying chart's container in the fullscreen mode.
+         *
+         * **Note**: Fullscreen is not supported on iPhone due to iOS limitations.
+         *
+         * @class
+         * @name Highcharts.Fullscreen
+         * @hideconstructor
+         * @requires modules/full-screen
+         */
+        var Fullscreen = /** @class */ (function () {
+                /* *
+                 *
+                 *  Constructors
+                 *
+                 * */
+                function Fullscreen(chart) {
+                    /**
+                     * Chart managed by the fullscreen controller.
+                     * @name Highcharts.Fullscreen#chart
+                     * @type {Highcharts.Chart}
+                     */
+                    this.chart = chart;
+                /**
+                 * The flag is set to `true` when the chart is displayed in
+                 * the fullscreen mode.
+                 *
+                 * @name Highcharts.Fullscreen#isOpen
+                 * @type {boolean|undefined}
+                 * @since 8.0.1
+                 */
+                this.isOpen = false;
+                var container = chart.renderTo;
+                // Hold event and methods available only for a current browser.
+                if (!this.browserProps) {
+                    if (typeof container.requestFullscreen === 'function') {
+                        this.browserProps = {
+                            fullscreenChange: 'fullscreenchange',
+                            requestFullscreen: 'requestFullscreen',
+                            exitFullscreen: 'exitFullscreen'
+                        };
+                    }
+                    else if (container.mozRequestFullScreen) {
+                        this.browserProps = {
+                            fullscreenChange: 'mozfullscreenchange',
+                            requestFullscreen: 'mozRequestFullScreen',
+                            exitFullscreen: 'mozCancelFullScreen'
+                        };
+                    }
+                    else if (container.webkitRequestFullScreen) {
+                        this.browserProps = {
+                            fullscreenChange: 'webkitfullscreenchange',
+                            requestFullscreen: 'webkitRequestFullScreen',
+                            exitFullscreen: 'webkitExitFullscreen'
+                        };
+                    }
+                    else if (container.msRequestFullscreen) {
+                        this.browserProps = {
+                            fullscreenChange: 'MSFullscreenChange',
+                            requestFullscreen: 'msRequestFullscreen',
+                            exitFullscreen: 'msExitFullscreen'
+                        };
+                    }
                 }
             }
-        };
+            /* *
+             *
+             *  Functions
+             *
+             * */
+            /**
+             * Stops displaying the chart in fullscreen mode.
+             * Exporting module required.
+             *
+             * @since       8.0.1
+             *
+             * @function    Highcharts.Fullscreen#close
+             * @return      {void}
+             * @requires    modules/full-screen
+             */
+            Fullscreen.prototype.close = function () {
+                var fullscreen = this,
+                    chart = fullscreen.chart,
+                    optionsChart = chart.options.chart;
+                // Don't fire exitFullscreen() when user exited using 'Escape' button.
+                if (fullscreen.isOpen &&
+                    fullscreen.browserProps &&
+                    chart.container.ownerDocument instanceof Document) {
+                    chart.container.ownerDocument[fullscreen.browserProps.exitFullscreen]();
+                }
+                // Unbind event as it's necessary only before exiting from fullscreen.
+                if (fullscreen.unbindFullscreenEvent) {
+                    fullscreen.unbindFullscreenEvent = fullscreen.unbindFullscreenEvent();
+                }
+                chart.setSize(fullscreen.origWidth, fullscreen.origHeight, false);
+                fullscreen.origWidth = void 0;
+                fullscreen.origHeight = void 0;
+                optionsChart.width = fullscreen.origWidthOption;
+                optionsChart.height = fullscreen.origHeightOption;
+                fullscreen.origWidthOption = void 0;
+                fullscreen.origHeightOption = void 0;
+                fullscreen.isOpen = false;
+                fullscreen.setButtonText();
+            };
+            /**
+             * Displays the chart in fullscreen mode.
+             * When fired customly by user before exporting context button is created,
+             * button's text will not be replaced - it's on the user side.
+             * Exporting module required.
+             *
+             * @since       8.0.1
+             *
+             * @function Highcharts.Fullscreen#open
+             * @return      {void}
+             * @requires    modules/full-screen
+             */
+            Fullscreen.prototype.open = function () {
+                var fullscreen = this,
+                    chart = fullscreen.chart,
+                    optionsChart = chart.options.chart;
+                if (optionsChart) {
+                    fullscreen.origWidthOption = optionsChart.width;
+                    fullscreen.origHeightOption = optionsChart.height;
+                }
+                fullscreen.origWidth = chart.chartWidth;
+                fullscreen.origHeight = chart.chartHeight;
+                // Handle exitFullscreen() method when user clicks 'Escape' button.
+                if (fullscreen.browserProps) {
+                    var unbindChange_1 = addEvent(chart.container.ownerDocument, // chart's document
+                        fullscreen.browserProps.fullscreenChange,
+                        function () {
+                            // Handle lack of async of browser's fullScreenChange event.
+                            if (fullscreen.isOpen) {
+                                fullscreen.isOpen = false;
+                            fullscreen.close();
+                        }
+                        else {
+                            chart.setSize(null, null, false);
+                            fullscreen.isOpen = true;
+                            fullscreen.setButtonText();
+                        }
+                    });
+                    var unbindDestroy_1 = addEvent(chart, 'destroy',
+                        unbindChange_1);
+                    fullscreen.unbindFullscreenEvent = function () {
+                        unbindChange_1();
+                        unbindDestroy_1();
+                    };
+                    var promise = chart.renderTo[fullscreen.browserProps.requestFullscreen]();
+                    if (promise) {
+                        // No dot notation because of IE8 compatibility
+                        promise['catch'](function () {
+                            alert(// eslint-disable-line no-alert
+                            'Full screen is not supported inside a frame.');
+                        });
+                    }
+                }
+            };
+            /**
+             * Replaces the exporting context button's text when toogling the
+             * fullscreen mode.
+             *
+             * @private
+             *
+             * @since 8.0.1
+             *
+             * @requires modules/full-screen
+             * @return {void}
+             */
+            Fullscreen.prototype.setButtonText = function () {
+                var chart = this.chart,
+                    exportDivElements = chart.exportDivElements,
+                    exportingOptions = chart.options.exporting,
+                    menuItems = (exportingOptions &&
+                        exportingOptions.buttons &&
+                        exportingOptions.buttons.contextButton.menuItems),
+                    lang = chart.options.lang;
+                if (exportingOptions &&
+                    exportingOptions.menuItemDefinitions &&
+                    lang &&
+                    lang.exitFullscreen &&
+                    lang.viewFullscreen &&
+                    menuItems &&
+                    exportDivElements &&
+                    exportDivElements.length) {
+                    AST.setElementHTML(exportDivElements[menuItems.indexOf('viewFullscreen')], !this.isOpen ?
+                        (exportingOptions.menuItemDefinitions.viewFullscreen.text ||
+                            lang.viewFullscreen) : lang.exitFullscreen);
+                }
+            };
+            /**
+             * Toggles displaying the chart in fullscreen mode.
+             * By default, when the exporting module is enabled, a context button with
+             * a drop down menu in the upper right corner accesses this function.
+             * Exporting module required.
+             *
+             * @since 8.0.1
+             *
+             * @sample      highcharts/members/chart-togglefullscreen/
+             *              Toggle fullscreen mode from a HTML button
+             *
+             * @function Highcharts.Fullscreen#toggle
+             * @requires    modules/full-screen
+             */
+            Fullscreen.prototype.toggle = function () {
+                var fullscreen = this;
+                if (!fullscreen.isOpen) {
+                    fullscreen.open();
+                }
+                else {
+                    fullscreen.close();
+                }
+            };
+            return Fullscreen;
+        }());
+        H.Fullscreen = Fullscreen;
+        // Initialize fullscreen
+        addEvent(Chart, 'beforeRender', function () {
+            /**
+             * @name Highcharts.Chart#fullscreen
+             * @type {Highcharts.Fullscreen}
+             * @requires modules/full-screen
+             */
+            this.fullscreen = new H.Fullscreen(this);
+        });
 
+        return H.Fullscreen;
     });
-    _registerModule(_modules, 'mixins/navigation.js', [], function () {
+    _registerModule(_modules, 'Mixins/Navigation.js', [], function () {
         /**
          *
-         *  (c) 2010-2018 Paweł Fus
+         *  (c) 2010-2021 Paweł Fus
          *
          *  License: www.highcharts.com/license
          *
@@ -98,22 +284,25 @@
          *
          * */
         var chartNavigation = {
-            /**
-             * Initializes `chart.navigation` object which delegates `update()` methods
-             * to all other common classes (used in exporting and navigationBindings).
-             *
-             * @private
-             * @param {Highcharts.Chart} chart
-             *        The chart instance.
-             * @return {void}
-             */
-            initUpdate: function (chart) {
-                if (!chart.navigation) {
-                    chart.navigation = {
-                        updates: [],
-                        update: function (options, redraw) {
-                            this.updates.forEach(function (updateConfig) {
-                                updateConfig.update.call(updateConfig.context, options, redraw);
+                /**
+                 * Initializes `chart.navigation` object which delegates `update()` methods
+                 * to all other common classes (used in exporting and navigationBindings).
+                 *
+                 * @private
+                 * @param {Highcharts.Chart} chart
+                 *        The chart instance.
+                 * @return {void}
+                 */
+                initUpdate: function (chart) {
+                    if (!chart.navigation) {
+                        chart.navigation = {
+                            updates: [],
+                            update: function (options,
+            redraw) {
+                                this.updates.forEach(function (updateConfig) {
+                                    updateConfig.update.call(updateConfig.context,
+            options,
+            redraw);
                             });
                         }
                     };
@@ -143,18 +332,35 @@
 
         return chartNavigation;
     });
-    _registerModule(_modules, 'modules/exporting.src.js', [_modules['parts/Globals.js'], _modules['parts/Utilities.js'], _modules['mixins/navigation.js']], function (H, U, chartNavigationMixin) {
+    _registerModule(_modules, 'Extensions/Exporting.js', [_modules['Core/Chart/Chart.js'], _modules['Mixins/Navigation.js'], _modules['Core/Globals.js'], _modules['Core/Options.js'], _modules['Core/Color/Palette.js'], _modules['Core/Renderer/SVG/SVGRenderer.js'], _modules['Core/Utilities.js']], function (Chart, chartNavigationMixin, H, O, palette, SVGRenderer, U) {
         /* *
          *
          *  Exporting module
          *
-         *  (c) 2010-2019 Torstein Honsi
+         *  (c) 2010-2021 Torstein Honsi
          *
          *  License: www.highcharts.com/license
          *
          *  !!!!!!! SOURCE GETS TRANSPILED BY TYPESCRIPT. EDIT TS FILE ONLY. !!!!!!!
          *
          * */
+        var doc = H.doc,
+            isTouchDevice = H.isTouchDevice,
+            win = H.win;
+        var defaultOptions = O.defaultOptions;
+        var addEvent = U.addEvent,
+            css = U.css,
+            createElement = U.createElement,
+            discardElement = U.discardElement,
+            extend = U.extend,
+            find = U.find,
+            fireEvent = U.fireEvent,
+            isObject = U.isObject,
+            merge = U.merge,
+            objectEach = U.objectEach,
+            pick = U.pick,
+            removeEvent = U.removeEvent,
+            uniqueKey = U.uniqueKey;
         /**
          * Gets fired after a chart is printed through the context menu item or the
          * Chart.print method.
@@ -221,9 +427,6 @@
          *
          * @typedef {"image/png"|"image/jpeg"|"application/pdf"|"image/svg+xml"} Highcharts.ExportingMimeTypeValue
          */
-        var discardElement = U.discardElement, extend = U.extend, isObject = U.isObject, objectEach = U.objectEach, pick = U.pick;
-        // create shortcuts
-        var defaultOptions = H.defaultOptions, doc = H.doc, Chart = H.Chart, addEvent = H.addEvent, removeEvent = H.removeEvent, fireEvent = H.fireEvent, createElement = H.createElement, css = H.css, merge = H.merge, isTouchDevice = H.isTouchDevice, win = H.win, userAgent = win.navigator.userAgent, SVGRenderer = H.SVGRenderer, symbols = H.Renderer.prototype.symbols, isMSBrowser = /Edge\/|Trident\/|MSIE /.test(userAgent), isFirefoxBrowser = /firefox/i.test(userAgent);
         // Add language
         extend(defaultOptions.lang
         /**
@@ -231,14 +434,23 @@
          */
         , {
             /**
-             * Exporting module only. View the chart in full screen.
+             * Exporting module only. The text for the menu item to view the chart
+             * in full screen.
              *
-             * @since    7.1.0
-             * @requires modules/exporting
+             * @since 8.0.1
              *
              * @private
              */
             viewFullscreen: 'View in full screen',
+            /**
+             * Exporting module only. The text for the menu item to exit the chart
+             * from full screen.
+             *
+             * @since 8.0.1
+             *
+             * @private
+             */
+            exitFullscreen: 'Exit from full screen',
             /**
              * Exporting module only. The text for the menu item to print the chart.
              *
@@ -427,14 +639,14 @@
             }
         });
         // Presentational attributes
-        merge(true, defaultOptions.navigation
+        merge(true, defaultOptions.navigation, 
         /**
          * A collection of options for buttons and menus appearing in the exporting
          * module.
          *
          * @optionparent navigation
          */
-        , {
+        {
             /**
              * CSS styles for the popup menu appearing by default when the export
              * icon is clicked. This menu is rendered in HTML.
@@ -453,9 +665,9 @@
              */
             menuStyle: {
                 /** @ignore-option */
-                border: '1px solid #999999',
+                border: "1px solid " + palette.neutralColor40,
                 /** @ignore-option */
-                background: '#ffffff',
+                background: palette.backgroundColor,
                 /** @ignore-option */
                 padding: '5px 0'
             },
@@ -481,7 +693,7 @@
                 /** @ignore-option */
                 padding: '0.5em 1em',
                 /** @ignore-option */
-                color: '#333333',
+                color: palette.neutralColor80,
                 /** @ignore-option */
                 background: 'none',
                 /** @ignore-option */
@@ -508,9 +720,9 @@
              */
             menuItemHoverStyle: {
                 /** @ignore-option */
-                background: '#335cad',
+                background: palette.highlightColor80,
                 /** @ignore-option */
-                color: '#ffffff'
+                color: palette.backgroundColor
             },
             /**
              * A collection of options for buttons appearing in the exporting
@@ -533,7 +745,7 @@
                  * @type  {Highcharts.ColorString|Highcharts.GradientColorObject|Highcharts.PatternObject}
                  * @since 2.0
                  */
-                symbolFill: '#666666',
+                symbolFill: palette.neutralColor60,
                 /**
                  * The color of the symbol's stroke or line.
                  *
@@ -543,7 +755,7 @@
                  * @type  {Highcharts.ColorString}
                  * @since 2.0
                  */
-                symbolStroke: '#666666',
+                symbolStroke: palette.neutralColor60,
                 /**
                  * The pixel stroke width of the symbol on the button.
                  *
@@ -571,7 +783,7 @@
                      * The default fill exists only to capture hover events.
                      *
                      * @type      {Highcharts.ColorString|Highcharts.GradientColorObject|Highcharts.PatternObject}
-                     * @default   #ffffff
+                     * @default   ${palette.backgroundColor}
                      * @apioption navigation.buttonOptions.theme.fill
                      */
                     /**
@@ -932,12 +1144,16 @@
              * - **textKey:** If internationalization is required, the key to a language
              *   string
              *
+             * Custom text for the "exitFullScreen" can be set only in lang options
+             * (it is not a separate button).
+             *
              * @sample {highcharts} highcharts/exporting/menuitemdefinitions/
              *         Menu item definitions
              * @sample {highstock} highcharts/exporting/menuitemdefinitions/
              *         Menu item definitions
              * @sample {highmaps} highcharts/exporting/menuitemdefinitions/
              *         Menu item definitions
+             *
              *
              * @type    {Highcharts.Dictionary<Highcharts.ExportingMenuObject>}
              * @default {"viewFullscreen": {}, "printChart": {}, "separator": {}, "downloadPNG": {}, "downloadJPEG": {}, "downloadPDF": {}, "downloadSVG": {}}
@@ -950,7 +1166,7 @@
                 viewFullscreen: {
                     textKey: 'viewFullscreen',
                     onclick: function () {
-                        this.fullscreen = new H.FullScreen(this.container);
+                        this.fullscreen.toggle();
                     }
                 },
                 /**
@@ -1053,13 +1269,16 @@
          */
         H.post = function (url, data, formAttributes) {
             // create the form
-            var form = createElement('form', merge({
-                method: 'post',
-                action: url,
-                enctype: 'multipart/form-data'
-            }, formAttributes), {
-                display: 'none'
-            }, doc.body);
+            var form = createElement('form',
+                merge({
+                    method: 'post',
+                    action: url,
+                    enctype: 'multipart/form-data'
+                },
+                formAttributes), {
+                    display: 'none'
+                },
+                doc.body);
             // add the data
             objectEach(data, function (val, name) {
                 createElement('input', {
@@ -1104,7 +1323,8 @@
              * @requires modules/exporting
              */
             sanitizeSVG: function (svg, options) {
-                var split = svg.indexOf('</svg>') + 6, html = svg.substr(split);
+                var split = svg.indexOf('</svg>') + 6,
+                    html = svg.substr(split);
                 // Remove any HTML added to the container after the SVG (#894, #9087)
                 svg = svg.substr(0, split);
                 // Move HTML into a foreignObject
@@ -1114,7 +1334,8 @@
                             'width="' + options.chart.width + '" ' +
                             'height="' + options.chart.height + '">' +
                             '<body xmlns="http://www.w3.org/1999/xhtml">' +
-                            html +
+                            // Some tags needs to be closed in xhtml (#13726)
+                            html.replace(/(<(?:img|br).*?(?=\>))>/g, '$1 />') +
                             '</body>' +
                             '</foreignObject>';
                         svg = svg.replace('</svg>', html + '</svg>');
@@ -1182,9 +1403,18 @@
              * @requires modules/exporting
              */
             getSVG: function (chartOptions) {
-                var chart = this, chartCopy, sandbox, svg, seriesOptions, sourceWidth, sourceHeight, cssWidth, cssHeight, 
-                // Copy the options and add extra options
-                options = merge(chart.options, chartOptions);
+                var chart = this,
+                    chartCopy,
+                    sandbox,
+                    svg,
+                    seriesOptions,
+                    sourceWidth,
+                    sourceHeight,
+                    cssWidth,
+                    cssHeight, 
+                    // Copy the options and add extra options
+                    options = merge(chart.options,
+                    chartOptions);
                 // Use userOptions to make the options chain in series right (#3881)
                 options.plotOptions = merge(chart.userOptions.plotOptions, chartOptions && chartOptions.plotOptions);
                 // ... and likewise with time, avoid that undefined time properties are
@@ -1233,14 +1463,24 @@
                         options.series.push(seriesOptions);
                     }
                 });
-                // Assign an internal key to ensure a one-to-one mapping (#5924)
+                var colls = {};
                 chart.axes.forEach(function (axis) {
+                    // Assign an internal key to ensure a one-to-one mapping (#5924)
                     if (!axis.userOptions.internalKey) { // #6444
-                        axis.userOptions.internalKey = H.uniqueKey();
+                        axis.userOptions.internalKey = uniqueKey();
+                    }
+                    if (!axis.options.isInternal) {
+                        if (!colls[axis.coll]) {
+                            colls[axis.coll] = true;
+                            options[axis.coll] = [];
+                        }
+                        options[axis.coll].push(merge(axis.userOptions, {
+                            visible: axis.visible
+                        }));
                     }
                 });
                 // generate the chart copy
-                chartCopy = new H.Chart(options, chart.callback);
+                chartCopy = new Chart(options, chart.callback);
                 // Axis options and series options  (#2022, #3900, #5982)
                 if (chartOptions) {
                     ['xAxis', 'yAxis', 'series'].forEach(function (coll) {
@@ -1253,9 +1493,10 @@
                 }
                 // Reflect axis extremes in the export (#5924)
                 chart.axes.forEach(function (axis) {
-                    var axisCopy = H.find(chartCopy.axes, function (copy) {
-                        return copy.options.internalKey ===
-                            axis.userOptions.internalKey;
+                    var axisCopy = find(chartCopy.axes,
+                        function (copy) {
+                            return copy.options.internalKey ===
+                                axis.userOptions.internalKey;
                     }), extremes = axis.getExtremes(), userMin = extremes.userMin, userMax = extremes.userMax;
                     if (axisCopy &&
                         ((typeof userMin !== 'undefined' &&
@@ -1304,7 +1545,8 @@
              * @requires modules/exporting
              */
             getFilename: function () {
-                var s = this.userOptions.title && this.userOptions.title.text, filename = this.options.exporting.filename;
+                var s = this.userOptions.title && this.userOptions.title.text,
+                    filename = this.options.exporting.filename;
                 if (filename) {
                     return filename.replace(/\//g, '-');
                 }
@@ -1335,7 +1577,7 @@
              * @sample highcharts/members/chart-exportchart-custom-background/
              *         Different chart background in export
              * @sample stock/members/chart-exportchart/
-             *         Export with Highstock
+             *         Export with Highcharts Stock
              *
              * @function Highcharts.Chart#exportChart
              *
@@ -1353,7 +1595,8 @@
              * @requires modules/exporting
              */
             exportChart: function (exportingOptions, chartOptions) {
-                var svg = this.getSVGForExport(exportingOptions, chartOptions);
+                var svg = this.getSVGForExport(exportingOptions,
+                    chartOptions);
                 // merge the options
                 exportingOptions = merge(this.options.exporting, exportingOptions);
                 // do the post
@@ -1397,11 +1640,14 @@
             * @fires Highcharts.Chart#event:beforePrint
             */
             beforePrint: function () {
-                var chart = this, body = doc.body, printMaxWidth = chart.options.exporting.printMaxWidth, printReverseInfo = {
-                    childNodes: body.childNodes,
-                    origDisplay: [],
-                    resetParams: void 0
-                };
+                var chart = this,
+                    body = doc.body,
+                    printMaxWidth = chart.options.exporting.printMaxWidth,
+                    printReverseInfo = {
+                        childNodes: body.childNodes,
+                        origDisplay: [],
+                        resetParams: void 0
+                    };
                 var handleMaxWidth;
                 chart.isPrinting = true;
                 chart.pointer.reset(null, 0);
@@ -1446,7 +1692,9 @@
                 if (!chart.printReverseInfo) {
                     return void 0;
                 }
-                var childNodes = chart.printReverseInfo.childNodes, origDisplay = chart.printReverseInfo.origDisplay, resetParams = chart.printReverseInfo.resetParams;
+                var childNodes = chart.printReverseInfo.childNodes,
+                    origDisplay = chart.printReverseInfo.origDisplay,
+                    resetParams = chart.printReverseInfo.resetParams;
                 // put the chart back in
                 chart.moveContainers(chart.renderTo);
                 // restore all body content
@@ -1525,8 +1773,16 @@
              * @requires modules/exporting
              */
             contextMenu: function (className, items, x, y, width, height, button) {
-                var chart = this, navOptions = chart.options.navigation, chartWidth = chart.chartWidth, chartHeight = chart.chartHeight, cacheName = 'cache-' + className, menu = chart[cacheName], menuPadding = Math.max(width, height), // for mouse leave detection
-                innerMenu, menuStyle;
+                var chart = this,
+                    navOptions = chart.options.navigation,
+                    chartWidth = chart.chartWidth,
+                    chartHeight = chart.chartHeight,
+                    cacheName = 'cache-' + className,
+                    menu = chart[cacheName],
+                    menuPadding = Math.max(width,
+                    height), // for mouse leave detection
+                    innerMenu,
+                    menuStyle;
                 // create the menu only the first time
                 if (!menu) {
                     // create a HTML element above the SVG
@@ -1559,15 +1815,17 @@
                             button.setState(0);
                         }
                         chart.openMenu = false;
-                        css(chart.renderTo, { overflow: 'hidden' }); // #10361
-                        H.clearTimeout(menu.hideTimer);
+                        // #10361, #9998
+                        css(chart.renderTo, { overflow: 'hidden' });
+                        css(chart.container, { overflow: 'hidden' });
+                        U.clearTimeout(menu.hideTimer);
                         fireEvent(chart, 'exportMenuHidden');
                     };
                     // Hide the menu some time after mouse leave (#1357)
                     chart.exportEvents.push(addEvent(menu, 'mouseleave', function () {
                         menu.hideTimer = win.setTimeout(menu.hideMenu, 500);
                     }), addEvent(menu, 'mouseenter', function () {
-                        H.clearTimeout(menu.hideTimer);
+                        U.clearTimeout(menu.hideTimer);
                     }), 
                     // Hide it on clicking or touching outside the menu (#2258,
                     // #2335, #2407)
@@ -1587,11 +1845,16 @@
                                 .menuItemDefinitions[item];
                         }
                         if (isObject(item, true)) {
-                            var element;
+                            var element = void 0;
                             if (item.separator) {
                                 element = createElement('hr', null, null, innerMenu);
                             }
                             else {
+                                // When chart initialized with the table,
+                                // wrong button text displayed, #14352.
+                                if (item.textKey === 'viewData' && chart.isDataTableVisible) {
+                                    item.textKey = 'hideData';
+                                }
                                 element = createElement('li', {
                                     className: 'highcharts-menu-item',
                                     onclick: function (e) {
@@ -1603,10 +1866,10 @@
                                             item.onclick
                                                 .apply(chart, arguments);
                                         }
-                                    },
-                                    innerHTML: (item.text ||
-                                        chart.options.lang[item.textKey])
+                                    }
                                 }, null, innerMenu);
+                                element.appendChild(doc.createTextNode(item.text ||
+                                    chart.options.lang[item.textKey]));
                                 if (!chart.styledMode) {
                                     element.onmouseover = function () {
                                         css(this, navOptions.menuItemHoverStyle);
@@ -1646,7 +1909,9 @@
                     menuStyle.top = (y + height - menuPadding) + 'px';
                 }
                 css(menu, menuStyle);
-                css(chart.renderTo, { overflow: '' }); // #10361
+                // #10361, #9998
+                css(chart.renderTo, { overflow: '' });
+                css(chart.container, { overflow: '' });
                 chart.openMenu = true;
                 fireEvent(chart, 'exportMenuShown');
             },
@@ -1660,7 +1925,15 @@
              * @requires modules/exporting
              */
             addButton: function (options) {
-                var chart = this, renderer = chart.renderer, btnOptions = merge(chart.options.navigation.buttonOptions, options), onclick = btnOptions.onclick, menuItems = btnOptions.menuItems, symbol, button, symbolSize = btnOptions.symbolSize || 12;
+                var chart = this,
+                    renderer = chart.renderer,
+                    btnOptions = merge(chart.options.navigation.buttonOptions,
+                    options),
+                    onclick = btnOptions.onclick,
+                    menuItems = btnOptions.menuItems,
+                    symbol,
+                    button,
+                    symbolSize = btnOptions.symbolSize || 12;
                 if (!chart.btnCount) {
                     chart.btnCount = 0;
                 }
@@ -1669,12 +1942,16 @@
                     chart.exportDivElements = [];
                     chart.exportSVGElements = [];
                 }
-                if (btnOptions.enabled === false) {
+                if (btnOptions.enabled === false || !btnOptions.theme) {
                     return;
                 }
-                var attr = btnOptions.theme, states = attr.states, hover = states && states.hover, select = states && states.select, callback;
+                var attr = btnOptions.theme,
+                    states = attr.states,
+                    hover = states && states.hover,
+                    select = states && states.select,
+                    callback;
                 if (!chart.styledMode) {
-                    attr.fill = pick(attr.fill, '#ffffff');
+                    attr.fill = pick(attr.fill, palette.backgroundColor);
                     attr.stroke = pick(attr.stroke, 'none');
                 }
                 delete attr.states;
@@ -1697,7 +1974,7 @@
                     };
                 }
                 if (btnOptions.text && btnOptions.symbol) {
-                    attr.paddingLeft = pick(attr.paddingLeft, 25);
+                    attr.paddingLeft = pick(attr.paddingLeft, 30);
                 }
                 else if (!btnOptions.text) {
                     extend(attr, {
@@ -1708,7 +1985,7 @@
                 }
                 if (!chart.styledMode) {
                     attr['stroke-linecap'] = 'round';
-                    attr.fill = pick(attr.fill, '#ffffff');
+                    attr.fill = pick(attr.fill, palette.backgroundColor);
                     attr.stroke = pick(attr.stroke, 'none');
                 }
                 button = renderer
@@ -1759,7 +2036,11 @@
              * @requires modules/exporting
              */
             destroyExport: function (e) {
-                var chart = e ? e.target : this, exportSVGElements = chart.exportSVGElements, exportDivElements = chart.exportDivElements, exportEvents = chart.exportEvents, cacheName;
+                var chart = e ? e.target : this,
+                    exportSVGElements = chart.exportSVGElements,
+                    exportDivElements = chart.exportDivElements,
+                    exportEvents = chart.exportEvents,
+                    cacheName;
                 // Destroy the extra buttons added
                 if (exportSVGElements) {
                     exportSVGElements.forEach(function (elem, i) {
@@ -1784,7 +2065,7 @@
                 if (exportDivElements) {
                     exportDivElements.forEach(function (elem, i) {
                         // Remove the event handler
-                        H.clearTimeout(elem.hideTimer); // #5427
+                        U.clearTimeout(elem.hideTimer); // #5427
                         removeEvent(elem, 'mouseleave');
                         // Remove inline events
                         chart.exportDivElements[i] =
@@ -1848,8 +2129,15 @@
          * @requires modules/exporting
          */
         Chart.prototype.inlineStyles = function () {
-            var renderer = this.renderer, inlineToAttributes = renderer.inlineToAttributes, blacklist = renderer.inlineBlacklist, whitelist = renderer.inlineWhitelist, // For IE
-            unstyledElements = renderer.unstyledElements, defaultStyles = {}, dummySVG, iframe, iframeDoc;
+            var renderer = this.renderer,
+                inlineToAttributes = renderer.inlineToAttributes,
+                blacklist = renderer.inlineBlacklist,
+                whitelist = renderer.inlineWhitelist, // For IE
+                unstyledElements = renderer.unstyledElements,
+                defaultStyles = {},
+                dummySVG,
+                iframe,
+                iframeDoc;
             // Create an iframe where we read default styles without pollution from this
             // body
             iframe = doc.createElement('iframe');
@@ -1884,7 +2172,14 @@
              * @return {void}
              */
             function recurse(node) {
-                var styles, parentStyles, cssText = '', dummy, styleAttr, blacklisted, whitelisted, i;
+                var styles,
+                    parentStyles,
+                    cssText = '',
+                    dummy,
+                    styleAttr,
+                    blacklisted,
+                    whitelisted,
+                    i;
                 /**
                  * Check computed styles and whether they are in the white/blacklist for
                  * styles or atttributes.
@@ -1920,11 +2215,15 @@
                         // If parent node has the same style, it gets inherited, no need
                         // to inline it. Top-level props should be diffed against parent
                         // (#7687).
-                        if ((parentStyles[prop] !== val || node.nodeName === 'svg') &&
+                        if ((parentStyles[prop] !== val ||
+                            node.nodeName === 'svg') &&
                             defaultStyles[node.nodeName][prop] !== val) {
                             // Attributes
-                            if (inlineToAttributes.indexOf(prop) !== -1) {
-                                node.setAttribute(hyphenate(prop), val);
+                            if (!inlineToAttributes ||
+                                inlineToAttributes.indexOf(prop) !== -1) {
+                                if (val) {
+                                    node.setAttribute(hyphenate(prop), val);
+                                }
                                 // Styles
                             }
                             else {
@@ -1961,7 +2260,7 @@
                         dummySVG.removeChild(dummy);
                     }
                     // Loop through all styles and add them inline if they are ok
-                    if (isFirefoxBrowser || isMSBrowser) {
+                    if (H.isFirefox || H.isMS) {
                         // Some browsers put lots of styles on the prototype
                         for (var p in styles) { // eslint-disable-line guard-for-in
                             filterStyles(styles[p], p);
@@ -1993,23 +2292,38 @@
              */
             function tearDown() {
                 dummySVG.parentNode.removeChild(dummySVG);
+                // Remove trash from DOM that stayed after each exporting
+                iframe.parentNode.removeChild(iframe);
             }
             recurse(this.container.querySelector('svg'));
             tearDown();
         };
-        symbols.menu = function (x, y, width, height) {
+        H.Renderer.prototype.symbols.menu = function (x, y, width, height) {
             var arr = [
-                'M', x, y + 2.5,
-                'L', x + width, y + 2.5,
-                'M', x, y + height / 2 + 0.5,
-                'L', x + width, y + height / 2 + 0.5,
-                'M', x, y + height - 1.5,
-                'L', x + width, y + height - 1.5
-            ];
+                    ['M',
+                x,
+                y + 2.5],
+                    ['L',
+                x + width,
+                y + 2.5],
+                    ['M',
+                x,
+                y + height / 2 + 0.5],
+                    ['L',
+                x + width,
+                y + height / 2 + 0.5],
+                    ['M',
+                x,
+                y + height - 1.5],
+                    ['L',
+                x + width,
+                y + height - 1.5]
+                ];
             return arr;
         };
-        symbols.menuball = function (x, y, width, height) {
-            var path = [], h = (height / 3) - 2;
+        H.Renderer.prototype.symbols.menuball = function (x, y, width, height) {
+            var path = [],
+                h = (height / 3) - 2;
             path = path.concat(this.circle(width - h, y, h, h), this.circle(width - h, y + h + 4, h, h), this.circle(width - h, y + 2 * (h + 4), h, h));
             return path;
         };
@@ -2021,7 +2335,10 @@
          * @requires modules/exporting
          */
         Chart.prototype.renderExporting = function () {
-            var chart = this, exportingOptions = chart.options.exporting, buttons = exportingOptions.buttons, isDirty = chart.isDirtyExporting || !chart.exportSVGElements;
+            var chart = this,
+                exportingOptions = chart.options.exporting,
+                buttons = exportingOptions.buttons,
+                isDirty = chart.isDirtyExporting || !chart.exportSVGElements;
             chart.buttonOffset = 0;
             if (chart.isDirtyExporting) {
                 chart.destroyExport();
@@ -2037,8 +2354,6 @@
                 });
                 chart.isDirtyExporting = false;
             }
-            // Destroy the export elements at chart destroy
-            addEvent(chart, 'destroy', chart.destroyExport);
         };
         /* eslint-disable no-invalid-this */
         // Add update methods to handle chart.update and chart.exporting.update and
@@ -2080,19 +2395,21 @@
         Chart.prototype.callbacks.push(function (chart) {
             chart.renderExporting();
             addEvent(chart, 'redraw', chart.renderExporting);
+            // Destroy the export elements at chart destroy
+            addEvent(chart, 'destroy', chart.destroyExport);
             // Uncomment this to see a button directly below the chart, for quick
             // testing of export
             /*
-            var button, viewImage, viewSource;
+            let button, viewImage, viewSource;
             if (!chart.renderer.forExport) {
                 viewImage = function () {
-                    var div = doc.createElement('div');
+                    let div = doc.createElement('div');
                     div.innerHTML = chart.getSVGForExport();
                     chart.renderTo.parentNode.appendChild(div);
                 };
 
                 viewSource = function () {
-                    var pre = doc.createElement('pre');
+                    let pre = doc.createElement('pre');
                     pre.innerHTML = chart.getSVGForExport()
                         .replace(/</g, '\n&lt;')
                         .replace(/>/g, '&gt;');

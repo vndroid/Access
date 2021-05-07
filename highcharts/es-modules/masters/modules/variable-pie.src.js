@@ -1,13 +1,13 @@
 /**
- * @license Highcharts JS v8.0.0 (2019-12-10)
+ * @license Highcharts JS v9.1.0 (2021-05-03)
  * @module highcharts/modules/variable-pie
  * @requires highcharts
  *
  * Variable Pie module for Highcharts
  *
- * (c) 2010-2019 Grzegorz Blachliński
+ * (c) 2010-2021 Grzegorz Blachliński
  *
  * License: www.highcharts.com/license
  */
 'use strict';
-import '../../modules/variable-pie.src.js';
+import '../../Series/VariablePie/VariablePieSeries.js';

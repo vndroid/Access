@@ -1,7 +1,7 @@
 /**
- * @license Highcharts JS v8.0.0 (2019-12-10)
+ * @license Highcharts JS v9.1.0 (2021-05-03)
  *
- * (c) 2009-2019 Torstein Honsi
+ * (c) 2009-2021 Torstein Honsi
  *
  * License: www.highcharts.com/license
  */
@@ -26,10 +26,10 @@
             obj[path] = fn.apply(null, args);
         }
     }
-    _registerModule(_modules, 'themes/sand-signika.js', [_modules['parts/Globals.js']], function (Highcharts) {
+    _registerModule(_modules, 'Extensions/Themes/SandSignika.js', [_modules['Core/Globals.js'], _modules['Core/Options.js'], _modules['Core/Utilities.js']], function (Highcharts, O, U) {
         /* *
          *
-         *  (c) 2010-2019 Torstein Honsi
+         *  (c) 2010-2021 Torstein Honsi
          *
          *  License: www.highcharts.com/license
          *
@@ -39,14 +39,17 @@
          *
          * */
         /* global document */
+        var setOptions = O.setOptions;
+        var addEvent = U.addEvent,
+            createElement = U.createElement;
         // Load the fonts
-        Highcharts.createElement('link', {
+        createElement('link', {
             href: 'https://fonts.googleapis.com/css?family=Signika:400,700',
             rel: 'stylesheet',
             type: 'text/css'
         }, null, document.getElementsByTagName('head')[0]);
         // Add the background image to the container
-        Highcharts.addEvent(Highcharts.Chart, 'afterGetContainer', function () {
+        addEvent(Highcharts.Chart, 'afterGetContainer', function () {
             // eslint-disable-next-line no-invalid-this
             this.container.style.background =
                 'url(https://www.highcharts.com/samples/graphics/sand.png)';
@@ -112,7 +115,7 @@
                     shadow: false
                 }
             },
-            // Highstock specific
+            // Highcharts Stock specific
             navigator: {
                 xAxis: {
                     gridLineColor: '#D0D0D8'
@@ -135,7 +138,7 @@
             }
         };
         // Apply the theme
-        Highcharts.setOptions(Highcharts.theme);
+        setOptions(Highcharts.theme);
 
     });
     _registerModule(_modules, 'masters/themes/sand-signika.src.js', [], function () {

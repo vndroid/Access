@@ -1,15 +1,15 @@
 /**
- * @license Highstock JS v8.0.0 (2019-12-10)
+ * @license Highstock JS v9.1.0 (2021-05-03)
  * @module highcharts/modules/drag-panes
  * @requires highcharts
  * @requires highcharts/modules/stock
  *
  * Drag-panes module
  *
- * (c) 2010-2019 Highsoft AS
+ * (c) 2010-2021 Highsoft AS
  * Author: Kacper Madej
  *
  * License: www.highcharts.com/license
  */
 'use strict';
-import '../../modules/drag-panes.src.js';
+import '../../Extensions/DragPanes.js';
