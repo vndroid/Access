@@ -1,9 +1,9 @@
 /**
- * @license Highmaps JS v8.0.0 (2019-12-10)
+ * @license Highmaps JS v9.1.0 (2021-05-03)
  *
  * Tilemap module
  *
- * (c) 2010-2019 Highsoft AS
+ * (c) 2010-2021 Highsoft AS
  *
  * License: www.highcharts.com/license
  */
@@ -28,12 +28,12 @@
             obj[path] = fn.apply(null, args);
         }
     }
-    _registerModule(_modules, 'modules/tilemap.src.js', [_modules['parts/Globals.js'], _modules['parts/Utilities.js']], function (H, U) {
+    _registerModule(_modules, 'Series/Tilemap/TilemapPoint.js', [_modules['Mixins/ColorSeries.js'], _modules['Core/Series/SeriesRegistry.js'], _modules['Core/Utilities.js']], function (ColorSeriesModule, SeriesRegistry, U) {
         /* *
          *
          *  Tilemaps module
          *
-         *  (c) 2010-2017 Highsoft AS
+         *  (c) 2010-2021 Highsoft AS
          *  Author: Øystein Moseng
          *
          *  License: www.highcharts.com/license
@@ -41,26 +41,129 @@
          *  !!!!!!! SOURCE GETS TRANSPILED BY TYPESCRIPT. EDIT TS FILE ONLY. !!!!!!!
          *
          * */
-        var clamp = U.clamp, extend = U.extend, pick = U.pick;
+        var __extends = (this && this.__extends) || (function () {
+                var extendStatics = function (d,
+            b) {
+                    extendStatics = Object.setPrototypeOf ||
+                        ({ __proto__: [] } instanceof Array && function (d,
+            b) { d.__proto__ = b; }) ||
+                        function (d,
+            b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+                return extendStatics(d, b);
+            };
+            return function (d, b) {
+                extendStatics(d, b);
+                function __() { this.constructor = d; }
+                d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+            };
+        })();
+        var colorPointMixin = ColorSeriesModule.colorPointMixin;
+        var Point = SeriesRegistry.series.prototype.pointClass,
+            HeatmapPoint = SeriesRegistry.seriesTypes.heatmap.prototype.pointClass;
+        var extend = U.extend;
+        /* *
+         *
+         *  Class
+         *
+         * */
+        var TilemapPoint = /** @class */ (function (_super) {
+                __extends(TilemapPoint, _super);
+            function TilemapPoint() {
+                /* *
+                 *
+                 *  Properties
+                 *
+                 * */
+                var _this = _super !== null && _super.apply(this,
+                    arguments) || this;
+                _this.options = void 0;
+                _this.radius = void 0;
+                _this.series = void 0;
+                _this.tileEdges = void 0;
+                return _this;
+                /* eslint-enable valid-jsdoc */
+            }
+            /* *
+             *
+             *  Functions
+             *
+             * */
+            /* eslint-disable valid-jsdoc */
+            /**
+             * @private
+             * @function Highcharts.Point#haloPath
+             *
+             * @return {Highcharts.SVGElement|Highcharts.SVGPathArray|Array<Highcharts.SVGElement>}
+             */
+            TilemapPoint.prototype.haloPath = function () {
+                return this.series.tileShape.haloPath.apply(this, arguments);
+            };
+            return TilemapPoint;
+        }(HeatmapPoint));
+        extend(TilemapPoint.prototype, {
+            setState: Point.prototype.setState,
+            setVisible: colorPointMixin.setVisible
+        });
+        /* *
+         *
+         *  Default Export
+         *
+         * */
+
+        return TilemapPoint;
+    });
+    _registerModule(_modules, 'Series/Tilemap/TilemapShapes.js', [_modules['Core/Globals.js'], _modules['Core/Series/SeriesRegistry.js'], _modules['Core/Utilities.js']], function (H, SeriesRegistry, U) {
+        /* *
+         *
+         *  Tilemaps module
+         *
+         *  (c) 2010-2021 Highsoft AS
+         *  Author: Øystein Moseng
+         *
+         *  License: www.highcharts.com/license
+         *
+         *  !!!!!!! SOURCE GETS TRANSPILED BY TYPESCRIPT. EDIT TS FILE ONLY. !!!!!!!
+         *
+         * */
+        var noop = H.noop;
+        var _a = SeriesRegistry.seriesTypes,
+            HeatmapSeries = _a.heatmap,
+            ScatterSeries = _a.scatter;
+        var clamp = U.clamp,
+            pick = U.pick;
         /**
-         * @typedef {"circle"|"diamond"|"hexagon"|"square"} Highcharts.TilemapShapeValue
+         * Utility func to get padding definition from tile size division
+         * @private
+         * @param {Highcharts.TilemapSeries} series
+         * series
+         * @param {Highcharts.number} xDiv
+         * xDiv
+         * @param {Highcharts.number} yDiv
+         * yDiv
+         * @return {Highcharts.TilemapPaddingObject}
          */
-        var seriesType = H.seriesType, 
-        // Utility func to get padding definition from tile size division
-        tilePaddingFromTileSize = function (series, xDiv, yDiv) {
+        function tilePaddingFromTileSize(series, xDiv, yDiv) {
             var options = series.options;
             return {
                 xPad: (options.colsize || 1) / -xDiv,
                 yPad: (options.rowsize || 1) / -yDiv
             };
-        };
-        // Map of shape types.
-        H.tileShapeTypes = {
-            // Hexagon shape type.
-            hexagon: {
-                alignDataLabel: H.seriesTypes.scatter.prototype.alignDataLabel,
-                getSeriesPadding: function (series) {
-                    return tilePaddingFromTileSize(series, 3, 2);
+        }
+        /* *
+         *
+         *  Registry
+         *
+         * */
+        /**
+         * Map of shape types.
+         * @private
+         */
+        var TilemapShapes = {
+                // Hexagon shape type.
+                hexagon: {
+                    alignDataLabel: ScatterSeries.prototype.alignDataLabel,
+                    getSeriesPadding: function (series) {
+                        return tilePaddingFromTileSize(series, 3, 2);
                 },
                 haloPath: function (size) {
                     if (!size) {
@@ -68,31 +171,49 @@
                     }
                     var hexagon = this.tileEdges;
                     return [
-                        'M', hexagon.x2 - size, hexagon.y1 + size,
-                        'L', hexagon.x3 + size, hexagon.y1 + size,
-                        hexagon.x4 + size * 1.5, hexagon.y2,
-                        hexagon.x3 + size, hexagon.y3 - size,
-                        hexagon.x2 - size, hexagon.y3 - size,
-                        hexagon.x1 - size * 1.5, hexagon.y2,
-                        'Z'
+                        ['M', hexagon.x2 - size, hexagon.y1 + size],
+                        ['L', hexagon.x3 + size, hexagon.y1 + size],
+                        ['L', hexagon.x4 + size * 1.5, hexagon.y2],
+                        ['L', hexagon.x3 + size, hexagon.y3 - size],
+                        ['L', hexagon.x2 - size, hexagon.y3 - size],
+                        ['L', hexagon.x1 - size * 1.5, hexagon.y2],
+                        ['Z']
                     ];
                 },
                 translate: function () {
-                    var series = this, options = series.options, xAxis = series.xAxis, yAxis = series.yAxis, seriesPointPadding = options.pointPadding || 0, xPad = (options.colsize || 1) / 3, yPad = (options.rowsize || 1) / 2, yShift;
+                    var series = this,
+                        options = series.options,
+                        xAxis = series.xAxis,
+                        yAxis = series.yAxis,
+                        seriesPointPadding = options.pointPadding || 0,
+                        xPad = (options.colsize || 1) / 3,
+                        yPad = (options.rowsize || 1) / 2,
+                        yShift;
                     series.generatePoints();
                     series.points.forEach(function (point) {
                         var x1 = clamp(Math.floor(xAxis.len -
-                            xAxis.translate(point.x - xPad * 2, 0, 1, 0, 1)), -xAxis.len, 2 * xAxis.len), x2 = clamp(Math.floor(xAxis.len -
-                            xAxis.translate(point.x - xPad, 0, 1, 0, 1)), -xAxis.len, 2 * xAxis.len), x3 = clamp(Math.floor(xAxis.len -
-                            xAxis.translate(point.x + xPad, 0, 1, 0, 1)), -xAxis.len, 2 * xAxis.len), x4 = clamp(Math.floor(xAxis.len -
-                            xAxis.translate(point.x + xPad * 2, 0, 1, 0, 1)), -xAxis.len, 2 * xAxis.len), y1 = clamp(Math.floor(yAxis.translate(point.y - yPad, 0, 1, 0, 1)), -yAxis.len, 2 * yAxis.len), y2 = clamp(Math.floor(yAxis.translate(point.y, 0, 1, 0, 1)), -yAxis.len, 2 * yAxis.len), y3 = clamp(Math.floor(yAxis.translate(point.y + yPad, 0, 1, 0, 1)), -yAxis.len, 2 * yAxis.len), pointPadding = pick(point.pointPadding, seriesPointPadding), 
-                        // We calculate the point padding of the midpoints to
-                        // preserve the angles of the shape.
-                        midPointPadding = pointPadding *
-                            Math.abs(x2 - x1) / Math.abs(y3 - y2), xMidPadding = xAxis.reversed ?
-                            -midPointPadding : midPointPadding, xPointPadding = xAxis.reversed ?
-                            -pointPadding : pointPadding, yPointPadding = yAxis.reversed ?
-                            -pointPadding : pointPadding;
+                                xAxis.translate(point.x - xPad * 2, 0, 1, 0, 1)), -xAxis.len, 2 * xAxis.len),
+                            x2 = clamp(Math.floor(xAxis.len -
+                                xAxis.translate(point.x - xPad, 0, 1, 0, 1)), -xAxis.len, 2 * xAxis.len),
+                            x3 = clamp(Math.floor(xAxis.len -
+                                xAxis.translate(point.x + xPad, 0, 1, 0, 1)), -xAxis.len, 2 * xAxis.len),
+                            x4 = clamp(Math.floor(xAxis.len -
+                                xAxis.translate(point.x + xPad * 2, 0, 1, 0, 1)), -xAxis.len, 2 * xAxis.len),
+                            y1 = clamp(Math.floor(yAxis.translate(point.y - yPad, 0, 1, 0, 1)), -yAxis.len, 2 * yAxis.len),
+                            y2 = clamp(Math.floor(yAxis.translate(point.y, 0, 1, 0, 1)), -yAxis.len, 2 * yAxis.len),
+                            y3 = clamp(Math.floor(yAxis.translate(point.y + yPad, 0, 1, 0, 1)), -yAxis.len, 2 * yAxis.len),
+                            pointPadding = pick(point.pointPadding,
+                            seriesPointPadding), 
+                            // We calculate the point padding of the midpoints to
+                            // preserve the angles of the shape.
+                            midPointPadding = pointPadding *
+                                Math.abs(x2 - x1) / Math.abs(y3 - y2),
+                            xMidPadding = xAxis.reversed ?
+                                -midPointPadding : midPointPadding,
+                            xPointPadding = xAxis.reversed ?
+                                -pointPadding : pointPadding,
+                            yPointPadding = yAxis.reversed ?
+                                -pointPadding : pointPadding;
                         // Shift y-values for every second grid column
                         if (point.x % 2) {
                             yShift = yShift || Math.round(Math.abs(y3 - y1) / 2) *
@@ -120,13 +241,13 @@
                         point.shapeType = 'path';
                         point.shapeArgs = {
                             d: [
-                                'M', x2, y1,
-                                'L', x3, y1,
-                                x4, y2,
-                                x3, y3,
-                                x2, y3,
-                                x1, y2,
-                                'Z'
+                                ['M', x2, y1],
+                                ['L', x3, y1],
+                                ['L', x4, y2],
+                                ['L', x3, y3],
+                                ['L', x2, y3],
+                                ['L', x1, y2],
+                                ['Z']
                             ]
                         };
                     });
@@ -135,7 +256,7 @@
             },
             // Diamond shape type.
             diamond: {
-                alignDataLabel: H.seriesTypes.scatter.prototype.alignDataLabel,
+                alignDataLabel: ScatterSeries.prototype.alignDataLabel,
                 getSeriesPadding: function (series) {
                     return tilePaddingFromTileSize(series, 2, 2);
                 },
@@ -145,27 +266,43 @@
                     }
                     var diamond = this.tileEdges;
                     return [
-                        'M', diamond.x2, diamond.y1 + size,
-                        'L', diamond.x3 + size, diamond.y2,
-                        diamond.x2, diamond.y3 - size,
-                        diamond.x1 - size, diamond.y2,
-                        'Z'
+                        ['M', diamond.x2, diamond.y1 + size],
+                        ['L', diamond.x3 + size, diamond.y2],
+                        ['L', diamond.x2, diamond.y3 - size],
+                        ['L', diamond.x1 - size, diamond.y2],
+                        ['Z']
                     ];
                 },
                 translate: function () {
-                    var series = this, options = series.options, xAxis = series.xAxis, yAxis = series.yAxis, seriesPointPadding = options.pointPadding || 0, xPad = (options.colsize || 1), yPad = (options.rowsize || 1) / 2, yShift;
+                    var series = this,
+                        options = series.options,
+                        xAxis = series.xAxis,
+                        yAxis = series.yAxis,
+                        seriesPointPadding = options.pointPadding || 0,
+                        xPad = (options.colsize || 1),
+                        yPad = (options.rowsize || 1) / 2,
+                        yShift;
                     series.generatePoints();
                     series.points.forEach(function (point) {
                         var x1 = clamp(Math.round(xAxis.len -
-                            xAxis.translate(point.x - xPad, 0, 1, 0, 0)), -xAxis.len, 2 * xAxis.len), x2 = clamp(Math.round(xAxis.len -
-                            xAxis.translate(point.x, 0, 1, 0, 0)), -xAxis.len, 2 * xAxis.len), x3 = clamp(Math.round(xAxis.len -
-                            xAxis.translate(point.x + xPad, 0, 1, 0, 0)), -xAxis.len, 2 * xAxis.len), y1 = clamp(Math.round(yAxis.translate(point.y - yPad, 0, 1, 0, 0)), -yAxis.len, 2 * yAxis.len), y2 = clamp(Math.round(yAxis.translate(point.y, 0, 1, 0, 0)), -yAxis.len, 2 * yAxis.len), y3 = clamp(Math.round(yAxis.translate(point.y + yPad, 0, 1, 0, 0)), -yAxis.len, 2 * yAxis.len), pointPadding = pick(point.pointPadding, seriesPointPadding), 
-                        // We calculate the point padding of the midpoints to
-                        // preserve the angles of the shape.
-                        midPointPadding = pointPadding *
-                            Math.abs(x2 - x1) / Math.abs(y3 - y2), xPointPadding = xAxis.reversed ?
-                            -midPointPadding : midPointPadding, yPointPadding = yAxis.reversed ?
-                            -pointPadding : pointPadding;
+                                xAxis.translate(point.x - xPad, 0, 1, 0, 0)), -xAxis.len, 2 * xAxis.len),
+                            x2 = clamp(Math.round(xAxis.len -
+                                xAxis.translate(point.x, 0, 1, 0, 0)), -xAxis.len, 2 * xAxis.len),
+                            x3 = clamp(Math.round(xAxis.len -
+                                xAxis.translate(point.x + xPad, 0, 1, 0, 0)), -xAxis.len, 2 * xAxis.len),
+                            y1 = clamp(Math.round(yAxis.translate(point.y - yPad, 0, 1, 0, 0)), -yAxis.len, 2 * yAxis.len),
+                            y2 = clamp(Math.round(yAxis.translate(point.y, 0, 1, 0, 0)), -yAxis.len, 2 * yAxis.len),
+                            y3 = clamp(Math.round(yAxis.translate(point.y + yPad, 0, 1, 0, 0)), -yAxis.len, 2 * yAxis.len),
+                            pointPadding = pick(point.pointPadding,
+                            seriesPointPadding), 
+                            // We calculate the point padding of the midpoints to
+                            // preserve the angles of the shape.
+                            midPointPadding = pointPadding *
+                                Math.abs(x2 - x1) / Math.abs(y3 - y2),
+                            xPointPadding = xAxis.reversed ?
+                                -midPointPadding : midPointPadding,
+                            yPointPadding = yAxis.reversed ?
+                                -pointPadding : pointPadding;
                         // Shift y-values for every second grid column
                         // We have to reverse the shift for reversed y-axes
                         if (point.x % 2) {
@@ -190,11 +327,11 @@
                         point.shapeType = 'path';
                         point.shapeArgs = {
                             d: [
-                                'M', x2, y1,
-                                'L', x3, y2,
-                                x2, y3,
-                                x1, y2,
-                                'Z'
+                                ['M', x2, y1],
+                                ['L', x3, y2],
+                                ['L', x2, y3],
+                                ['L', x1, y2],
+                                ['Z']
                             ]
                         };
                     });
@@ -203,20 +340,34 @@
             },
             // Circle shape type.
             circle: {
-                alignDataLabel: H.seriesTypes.scatter.prototype.alignDataLabel,
+                alignDataLabel: ScatterSeries.prototype.alignDataLabel,
                 getSeriesPadding: function (series) {
                     return tilePaddingFromTileSize(series, 2, 2);
                 },
                 haloPath: function (size) {
-                    return H.seriesTypes.scatter.prototype.pointClass.prototype.haloPath
+                    return ScatterSeries.prototype.pointClass.prototype.haloPath
                         .call(this, size + (size && this.radius));
                 },
                 translate: function () {
-                    var series = this, options = series.options, xAxis = series.xAxis, yAxis = series.yAxis, seriesPointPadding = options.pointPadding || 0, yRadius = (options.rowsize || 1) / 2, colsize = (options.colsize || 1), colsizePx, yRadiusPx, xRadiusPx, radius, forceNextRadiusCompute = false;
+                    var series = this,
+                        options = series.options,
+                        xAxis = series.xAxis,
+                        yAxis = series.yAxis,
+                        seriesPointPadding = options.pointPadding || 0,
+                        yRadius = (options.rowsize || 1) / 2,
+                        colsize = (options.colsize || 1),
+                        colsizePx,
+                        yRadiusPx,
+                        xRadiusPx,
+                        radius,
+                        forceNextRadiusCompute = false;
                     series.generatePoints();
                     series.points.forEach(function (point) {
                         var x = clamp(Math.round(xAxis.len -
-                            xAxis.translate(point.x, 0, 1, 0, 0)), -xAxis.len, 2 * xAxis.len), y = clamp(Math.round(yAxis.translate(point.y, 0, 1, 0, 0)), -yAxis.len, 2 * yAxis.len), pointPadding = seriesPointPadding, hasPerPointPadding = false;
+                                xAxis.translate(point.x, 0, 1, 0, 0)), -xAxis.len, 2 * xAxis.len),
+                            y = clamp(Math.round(yAxis.translate(point.y, 0, 1, 0, 0)), -yAxis.len, 2 * yAxis.len),
+                            pointPadding = seriesPointPadding,
+                            hasPerPointPadding = false;
                         // If there is point padding defined on a single point, add it
                         if (typeof point.pointPadding !== 'undefined') {
                             pointPadding = point.pointPadding;
@@ -279,27 +430,58 @@
             },
             // Square shape type.
             square: {
-                alignDataLabel: H.seriesTypes.heatmap.prototype.alignDataLabel,
-                translate: H.seriesTypes.heatmap.prototype.translate,
-                getSeriesPadding: function () {
-                },
-                haloPath: H.seriesTypes.heatmap.prototype.pointClass.prototype.haloPath
+                alignDataLabel: HeatmapSeries.prototype.alignDataLabel,
+                translate: HeatmapSeries.prototype.translate,
+                getSeriesPadding: noop,
+                haloPath: HeatmapSeries.prototype.pointClass.prototype.haloPath
             }
         };
+        /* *
+         *
+         *  Default Export
+         *
+         * */
+
+        return TilemapShapes;
+    });
+    _registerModule(_modules, 'Series/Tilemap/TilemapComposition.js', [_modules['Core/Globals.js'], _modules['Core/Utilities.js']], function (H, U) {
+        /* *
+         *
+         *  Tilemaps module
+         *
+         *  (c) 2010-2021 Highsoft AS
+         *  Author: Øystein Moseng
+         *
+         *  License: www.highcharts.com/license
+         *
+         *  !!!!!!! SOURCE GETS TRANSPILED BY TYPESCRIPT. EDIT TS FILE ONLY. !!!!!!!
+         *
+         * */
+        /* *
+         *
+         *  Imports
+         *
+         * */
+        var addEvent = U.addEvent;
+        /* *
+         *
+         *  Composition
+         *
+         * */
         /* eslint-disable no-invalid-this */
         // Extension to add pixel padding for series. Uses getSeriesPixelPadding on each
         // series and adds the largest padding required. If no series has this function
         // defined, we add nothing.
-        H.addEvent(H.Axis, 'afterSetAxisTranslation', function () {
+        addEvent(H.Axis, 'afterSetAxisTranslation', function () {
             if (this.recomputingForTilemap || this.coll === 'colorAxis') {
                 return;
             }
             var axis = this, 
-            // Find which series' padding to use
-            seriesPadding = axis.series
-                .map(function (series) {
-                return series.getSeriesPixelPadding &&
-                    series.getSeriesPixelPadding(axis);
+                // Find which series' padding to use
+                seriesPadding = axis.series
+                    .map(function (series) {
+                    return series.getSeriesPixelPadding &&
+                        series.getSeriesPixelPadding(axis);
             })
                 .reduce(function (a, b) {
                 return (a && a.padding) > (b && b.padding) ?
@@ -321,6 +503,49 @@
                 axis.len += lengthPadding;
             }
         });
+
+    });
+    _registerModule(_modules, 'Series/Tilemap/TilemapSeries.js', [_modules['Core/Globals.js'], _modules['Core/Series/SeriesRegistry.js'], _modules['Series/Tilemap/TilemapPoint.js'], _modules['Series/Tilemap/TilemapShapes.js'], _modules['Core/Utilities.js']], function (H, SeriesRegistry, TilemapPoint, TilemapShapes, U) {
+        /* *
+         *
+         *  Tilemaps module
+         *
+         *  (c) 2010-2021 Highsoft AS
+         *  Author: Øystein Moseng
+         *
+         *  License: www.highcharts.com/license
+         *
+         *  !!!!!!! SOURCE GETS TRANSPILED BY TYPESCRIPT. EDIT TS FILE ONLY. !!!!!!!
+         *
+         * */
+        var __extends = (this && this.__extends) || (function () {
+                var extendStatics = function (d,
+            b) {
+                    extendStatics = Object.setPrototypeOf ||
+                        ({ __proto__: [] } instanceof Array && function (d,
+            b) { d.__proto__ = b; }) ||
+                        function (d,
+            b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+                return extendStatics(d, b);
+            };
+            return function (d, b) {
+                extendStatics(d, b);
+                function __() { this.constructor = d; }
+                d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+            };
+        })();
+        var noop = H.noop;
+        var _a = SeriesRegistry.seriesTypes,
+            ColumnSeries = _a.column,
+            HeatmapSeries = _a.heatmap,
+            ScatterSeries = _a.scatter;
+        var extend = U.extend,
+            merge = U.merge;
+        /* *
+         *
+         *  Class
+         *
+         * */
         /**
          * @private
          * @class
@@ -328,106 +553,60 @@
          *
          * @augments Highcharts.Series
          */
-        seriesType('tilemap', 'heatmap'
-        /**
-         * A tilemap series is a type of heatmap where the tile shapes are
-         * configurable.
-         *
-         * @sample highcharts/demo/honeycomb-usa/
-         *         Honeycomb tilemap, USA
-         * @sample maps/plotoptions/honeycomb-brazil/
-         *         Honeycomb tilemap, Brazil
-         * @sample maps/plotoptions/honeycomb-china/
-         *         Honeycomb tilemap, China
-         * @sample maps/plotoptions/honeycomb-europe/
-         *         Honeycomb tilemap, Europe
-         * @sample maps/demo/circlemap-africa/
-         *         Circlemap tilemap, Africa
-         * @sample maps/demo/diamondmap
-         *         Diamondmap tilemap
-         *
-         * @extends      plotOptions.heatmap
-         * @since        6.0.0
-         * @excluding    jitter, joinBy, shadow, allAreas, mapData, data
-         * @product      highcharts highmaps
-         * @requires     modules/tilemap.js
-         * @optionparent plotOptions.tilemap
-         */
-        , {
-            states: {
-                hover: {
-                    halo: {
-                        enabled: true,
-                        size: 2,
-                        opacity: 0.5,
-                        attributes: {
-                            zIndex: 3
-                        }
-                    }
-                }
-            },
+        var TilemapSeries = /** @class */ (function (_super) {
+                __extends(TilemapSeries, _super);
+            function TilemapSeries() {
+                /* *
+                 *
+                 *  Static Properties
+                 *
+                 * */
+                var _this = _super !== null && _super.apply(this,
+                    arguments) || this;
+                /* *
+                 *
+                 *  Properties
+                 *
+                 * */
+                _this.data = void 0;
+                _this.options = void 0;
+                _this.points = void 0;
+                _this.tileShape = void 0;
+                return _this;
+                /* eslint-enable valid-jsdoc */
+            }
+            /* *
+             *
+             *  Functions
+             *
+             * */
+            /* eslint-disable valid-jsdoc */
             /**
-             * The padding between points in the tilemap.
-             *
-             * @sample maps/plotoptions/tilemap-pointpadding
-             *         Point padding on tiles
+             * Use the shape's defined data label alignment function.
+             * @private
              */
-            pointPadding: 2,
-            /**
-             * The column size - how many X axis units each column in the tilemap
-             * should span. Works as in [Heatmaps](#plotOptions.heatmap.colsize).
-             *
-             * @sample {highcharts} maps/demo/heatmap/
-             *         One day
-             * @sample {highmaps} maps/demo/heatmap/
-             *         One day
-             *
-             * @type      {number}
-             * @default   1
-             * @product   highcharts highmaps
-             * @apioption plotOptions.tilemap.colsize
-             */
-            /**
-             * The row size - how many Y axis units each tilemap row should span.
-             * Analogous to [colsize](#plotOptions.tilemap.colsize).
-             *
-             * @sample {highcharts} maps/demo/heatmap/
-             *         1 by default
-             * @sample {highmaps} maps/demo/heatmap/
-             *         1 by default
-             *
-             * @type      {number}
-             * @default   1
-             * @product   highcharts highmaps
-             * @apioption plotOptions.tilemap.rowsize
-             */
-            /**
-             * The shape of the tiles in the tilemap. Possible values are `hexagon`,
-             * `circle`, `diamond`, and `square`.
-             *
-             * @sample maps/demo/circlemap-africa
-             *         Circular tile shapes
-             * @sample maps/demo/diamondmap
-             *         Diamond tile shapes
-             *
-             * @type {Highcharts.TilemapShapeValue}
-             */
-            tileShape: 'hexagon'
-        }, {
-            // Set tile shape object on series
-            setOptions: function () {
-                // Call original function
-                var ret = H.seriesTypes.heatmap.prototype.setOptions.apply(this, Array.prototype.slice.call(arguments));
-                this.tileShape = H.tileShapeTypes[ret.tileShape];
-                return ret;
-            },
-            // Use the shape's defined data label alignment function
-            alignDataLabel: function () {
+            TilemapSeries.prototype.alignDataLabel = function () {
                 return this.tileShape.alignDataLabel.apply(this, Array.prototype.slice.call(arguments));
-            },
-            // Get metrics for padding of axis for this series
-            getSeriesPixelPadding: function (axis) {
-                var isX = axis.isXAxis, padding = this.tileShape.getSeriesPadding(this), coord1, coord2;
+            };
+            TilemapSeries.prototype.drawPoints = function () {
+                var _this = this;
+                // In styled mode, use CSS, otherwise the fill used in the style
+                // sheet will take precedence over the fill attribute.
+                ColumnSeries.prototype.drawPoints.call(this);
+                this.points.forEach(function (point) {
+                    point.graphic &&
+                        point.graphic[_this.chart.styledMode ? 'css' : 'animate'](_this.colorAttribs(point));
+                });
+            };
+            /**
+             * Get metrics for padding of axis for this series.
+             * @private
+             */
+            TilemapSeries.prototype.getSeriesPixelPadding = function (axis) {
+                var isX = axis.isXAxis,
+                    padding = this.tileShape.getSeriesPadding(this),
+                    coord1,
+                    coord2;
                 // If the shape type does not require padding, return no-op padding
                 if (!padding) {
                     return {
@@ -451,30 +630,155 @@
                     // and max.
                     axisLengthFactor: isX ? 2 : 1.1
                 };
-            },
-            // Use translate from tileShape
-            translate: function () {
-                return this.tileShape.translate.apply(this, Array.prototype.slice.call(arguments));
-            }
-        }, extend({
-            // eslint-disable-next-line valid-jsdoc
+            };
             /**
+             * Set tile shape object on series.
              * @private
-             * @function Highcharts.Point#haloPath
-             *
-             * @return {Highcharts.SVGElement|Highcharts.SVGPathArray|Array<Highcharts.SVGElement>}
              */
-            haloPath: function () {
-                return this.series.tileShape.haloPath.apply(this, Array.prototype.slice.call(arguments));
-            }
-        }, H.colorPointMixin));
+            TilemapSeries.prototype.setOptions = function () {
+                // Call original function
+                var ret = _super.prototype.setOptions.apply(this,
+                    Array.prototype.slice.call(arguments));
+                this.tileShape = TilemapShapes[ret.tileShape];
+                return ret;
+            };
+            /**
+             * Use translate from tileShape.
+             * @private
+             */
+            TilemapSeries.prototype.translate = function () {
+                return this.tileShape.translate.apply(this, Array.prototype.slice.call(arguments));
+            };
+            /**
+             * A tilemap series is a type of heatmap where the tile shapes are
+             * configurable.
+             *
+             * @sample highcharts/demo/honeycomb-usa/
+             *         Honeycomb tilemap, USA
+             * @sample maps/plotoptions/honeycomb-brazil/
+             *         Honeycomb tilemap, Brazil
+             * @sample maps/plotoptions/honeycomb-china/
+             *         Honeycomb tilemap, China
+             * @sample maps/plotoptions/honeycomb-europe/
+             *         Honeycomb tilemap, Europe
+             * @sample maps/demo/circlemap-africa/
+             *         Circlemap tilemap, Africa
+             * @sample maps/demo/diamondmap
+             *         Diamondmap tilemap
+             *
+             * @extends      plotOptions.heatmap
+             * @since        6.0.0
+             * @excluding    jitter, joinBy, shadow, allAreas, mapData, marker, data,
+             *               dataSorting, boostThreshold, boostBlending
+             * @product      highcharts highmaps
+             * @requires     modules/tilemap.js
+             * @optionparent plotOptions.tilemap
+             */
+            TilemapSeries.defaultOptions = merge(HeatmapSeries.defaultOptions, {
+                // Remove marker from tilemap default options, as it was before
+                // heatmap refactoring.
+                marker: null,
+                states: {
+                    hover: {
+                        halo: {
+                            enabled: true,
+                            size: 2,
+                            opacity: 0.5,
+                            attributes: {
+                                zIndex: 3
+                            }
+                        }
+                    }
+                },
+                /**
+                 * The padding between points in the tilemap.
+                 *
+                 * @sample maps/plotoptions/tilemap-pointpadding
+                 *         Point padding on tiles
+                 */
+                pointPadding: 2,
+                /**
+                 * The column size - how many X axis units each column in the tilemap
+                 * should span. Works as in [Heatmaps](#plotOptions.heatmap.colsize).
+                 *
+                 * @sample {highcharts} maps/demo/heatmap/
+                 *         One day
+                 * @sample {highmaps} maps/demo/heatmap/
+                 *         One day
+                 *
+                 * @type      {number}
+                 * @default   1
+                 * @product   highcharts highmaps
+                 * @apioption plotOptions.tilemap.colsize
+                 */
+                /**
+                 * The row size - how many Y axis units each tilemap row should span.
+                 * Analogous to [colsize](#plotOptions.tilemap.colsize).
+                 *
+                 * @sample {highcharts} maps/demo/heatmap/
+                 *         1 by default
+                 * @sample {highmaps} maps/demo/heatmap/
+                 *         1 by default
+                 *
+                 * @type      {number}
+                 * @default   1
+                 * @product   highcharts highmaps
+                 * @apioption plotOptions.tilemap.rowsize
+                 */
+                /**
+                 * The shape of the tiles in the tilemap. Possible values are `hexagon`,
+                 * `circle`, `diamond`, and `square`.
+                 *
+                 * @sample maps/demo/circlemap-africa
+                 *         Circular tile shapes
+                 * @sample maps/demo/diamondmap
+                 *         Diamond tile shapes
+                 *
+                 * @type {Highcharts.TilemapShapeValue}
+                 */
+                tileShape: 'hexagon'
+            });
+            return TilemapSeries;
+        }(HeatmapSeries));
+        extend(TilemapSeries.prototype, {
+            // Revert the noop on getSymbol.
+            getSymbol: noop,
+            // Use drawPoints, markerAttribs, pointAttribs methods from the old
+            // heatmap implementation.
+            // TODO: Consider standarizing heatmap and tilemap into more
+            // consistent form.
+            markerAttribs: ScatterSeries.prototype.markerAttribs,
+            pointAttribs: ColumnSeries.prototype.pointAttribs,
+            pointClass: TilemapPoint
+        });
+        SeriesRegistry.registerSeriesType('tilemap', TilemapSeries);
+        /* *
+         *
+         *  Default Export
+         *
+         * */
+        /* *
+         *
+         *  API Declarations
+         *
+         * */
+        /**
+         * @typedef {"circle"|"diamond"|"hexagon"|"square"} Highcharts.TilemapShapeValue
+         */
+        ''; // detach doclets above
+        /* *
+         *
+         *  API Options
+         *
+         * */
         /**
          * A `tilemap` series. If the [type](#series.tilemap.type) option is
          * not specified, it is inherited from [chart.type](#chart.type).
          *
          * @extends   series,plotOptions.tilemap
          * @excluding allAreas, dataParser, dataURL, joinBy, mapData, marker,
-         *            pointRange, shadow, stack
+         *            pointRange, shadow, stack, dataSorting, boostThreshold,
+         *            boostBlending
          * @product   highcharts highmaps
          * @requires  modules/tilemap.js
          * @apioption series.tilemap
@@ -575,6 +879,7 @@
          */
         ''; // adds doclets above to the transpiled file
 
+        return TilemapSeries;
     });
     _registerModule(_modules, 'masters/modules/tilemap.src.js', [], function () {
 
