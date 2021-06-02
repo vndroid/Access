@@ -342,11 +342,6 @@ class Access_UA {
                 $this->browserID = 'ThunderX';
                 $this->browserName = '迅雷X';
                 $this->browserVersion = $matches[1];
-            } elseif (preg_match('#360 Alitephone Browser \(.*?\/([\d+\.]+[\d+])\)#i', $this->ua, $matches)) {
-                // 360 Quick Android
-                $this->browserID = '360Quick';
-                $this->browserName = '极速浏览器';
-                $this->browserVersion = $matches[1];
             } elseif (preg_match('#Qiyu/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 // Qiyu Android / iOS / PC
                 $this->browserID = 'Qiyu';
