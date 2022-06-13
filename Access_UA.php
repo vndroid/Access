@@ -39,7 +39,6 @@ class Access_UA {
         'Heritrix',
         'Python-urllib',
         'Alexa (IA Archiver)',
-        'python-requests',
         'Ask',
         'Exabot',
         'Custo',
@@ -63,6 +62,11 @@ class Access_UA {
         'zgrab',
         'WordPress',
         'Scrapy',
+        'DNSPod-Monitor',
+        'Reeder',
+        'Tiny Tiny RSS',
+        'inoreader',
+        'python-requests',
     );
 
     private string $ua;
