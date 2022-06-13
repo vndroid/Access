@@ -1,6 +1,6 @@
 <?php
 if (!defined('__ACCESS_PLUGIN_ROOT__')) {
-    throw new Exception('Boostrap file not found');
+    throw new RuntimeException('Boostrap file not found');
 }
 
 class Access_Autoloader
