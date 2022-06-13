@@ -1,6 +1,6 @@
 <?php
 if (!defined('__ACCESS_PLUGIN_ROOT__')) {
-    throw new Exception('Boostrap file not found');
+    throw new RuntimeException('Boostrap file not found');
 }
 
 class Access_Core
@@ -67,7 +67,7 @@ class Access_Core
         $type = $this->request->get('type', 1);
         $filter = $this->request->get('filter', 'all');
         $pagenum = $this->request->get('page', 1);
-        $offset = (max(intval($pagenum), 1) - 1) * $this->config->pageSize;
+        $offset = (max((int)$pagenum, 1) - 1) * $this->config->pageSize;
         $query = $this->db->select()->from('table.access')
             ->order('time', Typecho_Db::SORT_DESC)
             ->offset($offset)->limit($this->config->pageSize);
@@ -214,19 +214,19 @@ class Access_Core
                     if (method_exists($subQuery, 'prepare')) {
                         $subQuery = $subQuery->prepare($subQuery);
                     }
-                    $this->overview[$type]['ip']['detail'][$hour] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('(' . $subQuery . ') AS tmp'))[0]['count']);
+                    $this->overview[$type]['ip']['detail'][$hour] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                        ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
                     // "SELECT DISTINCT ip,ua FROM {$this->table} {$where} AND `time` BETWEEN {$start} AND {$end}"));
                     $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')
                         ->where("time >= ? AND time <= ?", $start, $end);
                     if (method_exists($subQuery, 'prepare')) {
                         $subQuery = $subQuery->prepare($subQuery);
                     }
-                    $this->overview[$type]['uv']['detail'][$hour] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('(' . $subQuery . ') AS tmp'))[0]['count']);
+                    $this->overview[$type]['uv']['detail'][$hour] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                        ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
                     // "SELECT ip FROM {$this->table} {$where} AND `time` BETWEEN {$start} AND {$end}"));
-                    $this->overview[$type]['pv']['detail'][$hour] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count']);
+                    $this->overview[$type]['pv']['detail'][$hour] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                        ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count'];
                 }
 
                 # 统计当天总数据
@@ -237,22 +237,22 @@ class Access_Core
                 if (method_exists($subQuery, 'prepare')) {
                     $subQuery = $subQuery->prepare($subQuery);
                 }
-                $this->overview[$type]['ip']['count'] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')->from('(' . $subQuery . ') AS tmp'))[0]['count']);
+                $this->overview[$type]['ip']['count'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')->from('(' . $subQuery . ') AS tmp'))[0]['count'];
 
                 $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')->where("time >= ? AND time <= ?", $start, $end);
                 if (method_exists($subQuery, 'prepare')) {
                     $subQuery = $subQuery->prepare($subQuery);
                 }
-                $this->overview[$type]['uv']['count'] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')->from('(' . $subQuery . ') AS tmp'))[0]['count']);
+                $this->overview[$type]['uv']['count'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')->from('(' . $subQuery . ') AS tmp'))[0]['count'];
 
-                $this->overview[$type]['pv']['count'] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                $this->overview[$type]['pv']['count'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
                     ->from('table.access')
                     ->where("time >= ? AND time <= ?", $start, $end)
-                )[0]['count']);
+                )[0]['count'];
             } elseif($type == 'month') {
                 $year = date('Y');
                 $month = date("m");
-                $monthDays = cal_days_in_month(CAL_GREGORIAN, intval($month), intval($year)); # 计算当月天数
+                $monthDays = cal_days_in_month(CAL_GREGORIAN, (int)$month, (int)$year); # 计算当月天数
                 $this->overview[$type]['time'] = $month;
 
                 # 按天统计数据
@@ -265,17 +265,17 @@ class Access_Core
                     if (method_exists($subQuery, 'prepare')) {
                         $subQuery = $subQuery->prepare($subQuery);
                     }
-                    $this->overview[$type]['ip']['detail'][$day-1] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('(' . $subQuery . ') AS tmp'))[0]['count']);
+                    $this->overview[$type]['ip']['detail'][$day-1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                        ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
                     $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')
                         ->where('time >= ? AND time <= ?', $start, $end);
                     if (method_exists($subQuery, 'prepare')) {
                         $subQuery = $subQuery->prepare($subQuery);
                     }
-                    $this->overview[$type]['uv']['detail'][$day-1] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('(' . $subQuery . ') AS tmp'))[0]['count']);
-                    $this->overview[$type]['pv']['detail'][$day-1] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count']);
+                    $this->overview[$type]['uv']['detail'][$day-1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                        ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
+                    $this->overview[$type]['pv']['detail'][$day-1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                        ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count'];
 
                 }
             }
@@ -283,14 +283,14 @@ class Access_Core
 
         # 统计总计数据
         // "SELECT DISTINCT ip FROM {$this->table} {$where}"));
-        $this->overview['total']['ip'] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')
-            ->from('(' . $this->db->select('DISTINCT ip')->from('table.access') . ') AS tmp'))[0]['count']);
+        $this->overview['total']['ip'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+            ->from('(' . $this->db->select('DISTINCT ip')->from('table.access') . ') AS tmp'))[0]['count'];
         // "SELECT DISTINCT ip,ua FROM {$this->table} {$where}"));
-        $this->overview['total']['uv'] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')
-            ->from('(' . $this->db->select('DISTINCT ip,ua')->from('table.access') . ') AS tmp'))[0]['count']);
+        $this->overview['total']['uv'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+            ->from('(' . $this->db->select('DISTINCT ip,ua')->from('table.access') . ') AS tmp'))[0]['count'];
         // "SELECT ip FROM {$this->table} {$where}"));
-        $this->overview['total']['pv'] = intval($this->db->fetchAll($this->db->select('COUNT(1) AS count')
-            ->from('table.access'))[0]['count']);
+        $this->overview['total']['pv'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+            ->from('table.access'))[0]['count'];
 
         # 输出用于图表的Json
         $this->overview['chart_data'] = $this->makeChartJson();
@@ -307,7 +307,7 @@ class Access_Core
      * @return array 编码后的数据
      * @see http://www.php.net/manual/en/function.htmlspecialchars.php
      */
-    protected function htmlEncode($data, $valuesOnly = true, $charset = 'UTF-8')
+    protected function htmlEncode(array $data, bool $valuesOnly = true, string $charset = 'UTF-8'): array
     {
         if (is_array($data)) {
             $d = array();
@@ -334,7 +334,7 @@ class Access_Core
      * @return array 解码后的数据
      * @see http://www.php.net/manual/en/function.urldecode.php
      */
-    protected function urlDecode($data, $valuesOnly = true)
+    protected function urlDecode(array $data, bool $valuesOnly = true): array
     {
         if (is_array($data)) {
             $d = array();
@@ -357,7 +357,7 @@ class Access_Core
      * @access public
      * @return bool
      */
-    public function isAdmin()
+    public function isAdmin(): bool
     {
         $hasLogin = Typecho_Widget::widget('Widget_User')->hasLogin();
         if (!$hasLogin) {
@@ -388,7 +388,7 @@ class Access_Core
      * @access public
      * @return string
      */
-    public function getEntryPoint()
+    public function getEntryPoint(): string
     {
         $entrypoint = $this->request->getReferer();
         if ($entrypoint == null) {
@@ -409,7 +409,7 @@ class Access_Core
      * @param $ipv6
      * @return string
      */
-    function ip62long($ipv6)
+    function ip62long($ipv6): string
     {
         $ip_n = inet_pton($ipv6);
         $bits = 15; // 16 x 8 bit = 128bit

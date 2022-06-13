@@ -22,7 +22,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
      */
     public static function activate()
     {
-        $msg = Access_Plugin::install();
+        $msg = self::install();
         Helper::addPanel(1, self::$panel, _t('访问统计'), _t('统计控制台'), 'subscriber');
         Helper::addRoute("access_track_gif", "/access/log/track.gif", "Access_Action", 'writeLogs');
         Helper::addRoute("access_ip", "/access/ip.json", "Access_Action", 'ip');
@@ -101,7 +101,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
      */
     public static function install(): string
     {
-        if (substr(trim(dirname(__FILE__), '/'), -6) != 'Access') {
+        if (substr(trim(__DIR__, '/'), -6) != 'Access') {
             throw new Typecho_Plugin_Exception(_t('插件目录名必须为 Access'));
         }
         $db = Typecho_Db::get();
@@ -149,8 +149,9 @@ class Access_Plugin implements Typecho_Plugin_Interface
                         try {
                             $db->query($db->insert('table.access')->rows($row));
                         } catch (Typecho_Db_Exception $e) {
-                            if ($e->getCode() != 23000)
+                            if ($e->getCode() != 23000) {
                                 throw new Typecho_Plugin_Exception(_t('导入旧版数据失败，插件启用失败，错误信息：%s。', $e->getMessage()));
+                            }
                         }
                     }
                     $db->query("DROP TABLE `{$prefix}access`;", Typecho_Db::WRITE);
@@ -196,6 +197,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
      * 获取后端统计，该统计方法可以统计到一切访问
      *
      * @access public
+     * @param $archive
      * @return void
      */
     public static function backend($archive)
@@ -212,6 +214,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
      * 获取前端统计，该方法要求客户端必须渲染网页，所以不能统计RSS等直接抓取PHP页面的方式
      *
      * @access public
+     * @param $archive
      * @return void
      */
     public static function frontend($archive)
