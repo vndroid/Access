@@ -40,7 +40,7 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
                     'data' => $response,
                 );
             } else {
-                throw new Exception('解析 IP 失败');
+                throw new RuntimeException('解析 IP 失败');
             }
         } catch (Exception $e) {
             try {
@@ -70,7 +70,7 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
             $data = @file_get_contents('php://input');
             $data = Json::decode($data, true);
             if (!is_array($data)) {
-                throw new Exception('params invalid');
+                throw new RuntimeException('params invalid');
             }
             $this->access->deleteLogs($data);
             $response = array(
@@ -90,7 +90,7 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
     protected function checkAuth()
     {
         if (!$this->access->isAdmin()) {
-            throw new Exception('Access Denied');
+            throw new RuntimeException('Access Denied');
         }
     }
 
