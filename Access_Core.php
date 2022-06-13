@@ -1,6 +1,6 @@
 <?php
 if (!defined('__ACCESS_PLUGIN_ROOT__')) {
-    throw new RuntimeException('Boostrap file not found');
+    throw new RuntimeException('Bootstrap File Not Found');
 }
 
 class Access_Core
