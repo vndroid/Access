@@ -47,7 +47,7 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
                 $http = Typecho_Http_Client::get();
                 $result = $http->send('https://tools.keycdn.com/geo.json?host=' . $ip);
                 $result = Json::decode($result, true);
-                if ($result['status'] == 'success') {
+                if ($result['status'] === 'success') {
                     $response = array(
                         'code' => 0,
                         'data' => $result['data']['geo']['country_name'] . ' ' . $result['data']['geo']['city'],

@@ -101,7 +101,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
      */
     public static function install(): string
     {
-        if (substr(trim(__DIR__, '/'), -6) != 'Access') {
+        if (substr(trim(__DIR__, '/'), -6) !== 'Access') {
             throw new Typecho_Plugin_Exception(_t('插件目录名必须为 Access'));
         }
         $db = Typecho_Db::get();
@@ -232,7 +232,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
     {
         $url = $_SERVER['PHP_SELF'];
         $filename = substr($url, strrpos($url, '/') + 1);
-        if ($filename == 'index.php') {
+        if ($filename === 'index.php') {
             echo '<script>
 $(document).ready(function() {
   $("#start-link").append("<li><a href=\"';
