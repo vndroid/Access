@@ -307,7 +307,7 @@ class Access_Core
      * @return array 编码后的数据
      * @see http://www.php.net/manual/en/function.htmlspecialchars.php
      */
-    protected function htmlEncode(array $data, bool $valuesOnly = true, string $charset = 'UTF-8'): array
+    protected function htmlEncode($data, bool $valuesOnly = true, string $charset = 'UTF-8')
     {
         if (is_array($data)) {
             $d = array();
@@ -334,7 +334,7 @@ class Access_Core
      * @return array 解码后的数据
      * @see http://www.php.net/manual/en/function.urldecode.php
      */
-    protected function urlDecode(array $data, bool $valuesOnly = true): array
+    protected function urlDecode($data, bool $valuesOnly = true)
     {
         if (is_array($data)) {
             $d = array();
