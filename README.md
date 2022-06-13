@@ -28,6 +28,7 @@ Current Lauguage: **English** | [Simplified Chinese](/README_CN.md)
 * This branch need to change the Database to `_access` (**REMOVE** the _log suffix), Example: `typecho.typecho_access`.
 * When the plugin update, please disable the plugin before updating.
 * The plugin directory name must be 'Access'.
+* Need PHP Calendar ext.
 
 ### Features
 
@@ -41,12 +42,14 @@ Current Lauguage: **English** | [Simplified Chinese](/README_CN.md)
 
 ### Author
 
+<a href="https://github.com/vndroid/Access/graphs/contributors">
+<img src="https://contrib.rocks/image?repo=vndroid/Access" />
+</a>
+
+And origin authors
+
 [@kokororin](https://github.com/kokororin)
- 
+
 [@一名宅](https://github.com/tinymins)
 
 [@Zhizheng Zhang](https://github.com/izhizheng)
-
-[@Vndroid](https://github.com/Vndroid)
-
-
