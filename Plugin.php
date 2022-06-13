@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/Access_Bootstrap.php';
+
 /**
  * 纯前端访问统计插件
  *
@@ -67,14 +68,14 @@ class Access_Plugin implements Typecho_Plugin_Interface
             '分页数量', '每页显示的日志数量');
         $isDrop = new Typecho_Widget_Helper_Form_Element_Radio(
             'isDrop', array(
-                '0' => '否',
-                '1' => '是',
-            ), '0', '彻底卸载', '在禁用插件时，是否同时删除（不可恢复，谨慎选择）历史数据。');
+            '0' => '否',
+            '1' => '是',
+        ), '0', '彻底卸载', '在禁用插件时，是否同时删除（不可恢复，谨慎选择）历史数据。');
         $writeType = new Typecho_Widget_Helper_Form_Element_Radio(
             'writeType', array(
-                '0' => '前端',
-                '1' => '后端',
-            ), '1', '统计类型', '日志写入类型（若选择为前端方式，如果使用了 PJAX，请在 PJAX 相关事件中调用 window.Access.track() 方法），若写入速度较慢可选择前端写入日志。');
+            '0' => '前端',
+            '1' => '后端',
+        ), '1', '统计类型', '日志写入类型（若选择为前端方式，如果使用了 PJAX，请在 PJAX 相关事件中调用 window.Access.track() 方法），若写入速度较慢可选择前端写入日志。');
         $form->addInput($pageSize);
         $form->addInput($isDrop);
         $form->addInput($writeType);
@@ -88,7 +89,8 @@ class Access_Plugin implements Typecho_Plugin_Interface
      * @return void
      */
     public static function personalConfig(Typecho_Widget_Helper_Form $form)
-    {}
+    {
+    }
 
     /**
      * 初始化以及升级插件数据库，如初始化失败,直接抛出异常
@@ -97,16 +99,16 @@ class Access_Plugin implements Typecho_Plugin_Interface
      * @return string
      * @throws Typecho_Plugin_Exception
      */
-    public static function install()
+    public static function install(): string
     {
         if (substr(trim(dirname(__FILE__), '/'), -6) != 'Access') {
             throw new Typecho_Plugin_Exception(_t('插件目录名必须为 Access'));
         }
         $db = Typecho_Db::get();
         $adapterName = $db->getAdapterName();
-        
+
         if (strpos($adapterName, 'Mysql') !== false) {
-            $prefix  = $db->getPrefix();
+            $prefix = $db->getPrefix();
             $scripts = file_get_contents('usr/plugins/Access/sql/MySQL.sql');
             $scripts = str_replace('typecho_', $prefix, $scripts);
             $scripts = str_replace('%charset%', 'utf8mb4', $scripts);
@@ -130,19 +132,19 @@ class Access_Plugin implements Typecho_Plugin_Interface
                     foreach ($rows as $row) {
                         $ua = new Access_UA($row['ua']);
                         $time = Helper::options()->gmtTime + (Helper::options()->timezone - Helper::options()->serverTimezone);
-                        $row['browser_id'       ] = $ua->getBrowserID();
-                        $row['browser_version'  ] = $ua->getBrowserVersion();
-                        $row['os_id'            ] = $ua->getOSID();
-                        $row['os_version'       ] = $ua->getOSVersion();
-                        $row['path'             ] = parse_url($row['url'], PHP_URL_PATH);
-                        $row['query_string'     ] = parse_url($row['url'], PHP_URL_QUERY);
-                        $row['ip'               ] = bindec(decbin(ip2long($row['ip'])));
-                        $row['entrypoint'       ] = $row['referer'];
+                        $row['browser_id'] = $ua->getBrowserID();
+                        $row['browser_version'] = $ua->getBrowserVersion();
+                        $row['os_id'] = $ua->getOSID();
+                        $row['os_version'] = $ua->getOSVersion();
+                        $row['path'] = parse_url($row['url'], PHP_URL_PATH);
+                        $row['query_string'] = parse_url($row['url'], PHP_URL_QUERY);
+                        $row['ip'] = bindec(decbin(ip2long($row['ip'])));
+                        $row['entrypoint'] = $row['referer'];
                         $row['entrypoint_domain'] = $row['referer_domain'];
-                        $row['time'             ] = $row['date'];
-                        $row['robot'            ] = $ua->isRobot() ? 1 : 0;
-                        $row['robot_id'         ] = $ua->getRobotID();
-                        $row['robot_version'    ] = $ua->getRobotVersion();
+                        $row['time'] = $row['date'];
+                        $row['robot'] = $ua->isRobot() ? 1 : 0;
+                        $row['robot_id'] = $ua->getRobotID();
+                        $row['robot_version'] = $ua->getRobotVersion();
                         unset($row['date']);
                         try {
                             $db->query($db->insert('table.access')->rows($row));
@@ -161,7 +163,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
                 throw new Typecho_Plugin_Exception($e->getMessage());
             }
         } else if (strpos($adapterName, 'SQLite') !== false) {
-            $prefix  = $db->getPrefix();
+            $prefix = $db->getPrefix();
             $scripts = file_get_contents('usr/plugins/Access/sql/SQLite.sql');
             $scripts = str_replace('typecho_', $prefix, $scripts);
             $scripts = explode(';', $scripts);
