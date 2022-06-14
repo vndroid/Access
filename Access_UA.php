@@ -67,6 +67,7 @@ class Access_UA {
         'Tiny Tiny RSS',
         'inoreader',
         'python-requests',
+        'aiohttp',
     );
 
     private string $ua;
