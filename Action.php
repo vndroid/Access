@@ -13,10 +13,12 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
     }
 
     public function execute()
-    {}
+    {
+    }
 
     public function action()
-    {}
+    {
+    }
 
     public function writeLogs()
     {
@@ -44,9 +46,13 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
             }
         } catch (Exception $e) {
             try {
-                $http = Typecho_Http_Client::get();
-                $result = $http->send('https://tools.keycdn.com/geo.json?host=' . $ip);
-                $result = Json::decode($result, true);
+                $url = 'https://tools.keycdn.com/geo.json?host=';
+                $request = $url . $ip;
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_USERAGENT, 'keycdn-tools:https://www.bing.com');
+                curl_setopt($ch, CURLOPT_URL, $request);
+                $result = json_decode(curl_exec($ch), true);
                 if ($result['status'] === 'success') {
                     $response = array(
                         'code' => 0,
