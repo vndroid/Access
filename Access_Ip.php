@@ -39,8 +39,8 @@ class Access_Ip
         $url = 'https://freeapi.ipip.net/';
         $request = $url . $nip;
         $ch = curl_init();
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        #curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        #curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_URL, $request);
         $result = json_decode(curl_exec($ch), true);
@@ -49,7 +49,7 @@ class Access_Ip
         );
     }
 
-    private static function init()
+    private static function init(): void
     {
         if (self::$fp === NULL) {
             self::$ip = new self();
