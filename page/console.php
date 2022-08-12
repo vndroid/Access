@@ -45,25 +45,35 @@ $access = new Access_Core();
                             <?php if(isset($request->page)): ?>
                             <input type="hidden" value="<?php echo $request->get('page'); ?>" name="page" />
                             <?php endif; ?>
-                            <select name="filter">
-                                <option <?php if($request->filter == 'all'): ?> selected="true" <?php endif; ?>value="all"><?php _e('全部条件'); ?></option>
-                                <option <?php if($request->filter == 'ip'): ?> selected="true" <?php endif; ?>value="ip"><?php _e('按IP'); ?></option>
-                                <option <?php if($request->filter == 'post'): ?> selected="true" <?php endif; ?>value="post"><?php _e('按文章'); ?></option>
-                                <option <?php if($request->filter == 'path'): ?> selected="true" <?php endif; ?>value="path"><?php _e('按路由'); ?></option>
-                            </select>
-                            <input style="<?php if($request->get('filter', 'all') != 'ip'): ?>display: none<?php endif; ?>" type="text" class="text-s" placeholder="" value="<?php echo htmlspecialchars($request->ip); ?>" name="ip" />
-                            <select style="<?php if($request->get('filter', 'all') != 'post'): ?>display: none<?php endif; ?>" name="cid">
-                                <?php foreach ($access->logs['cidList'] as $content):?>
-                                <option <?php if($request->cid == $content['cid']): ?> selected="true" <?php endif; ?>value="<?php echo $content['cid'];?>"><?php echo $content['title'];?> (<?php echo $content['count'];?>)</option>
-                                <?php endforeach;?>
-                            </select>
-                            <input style="<?php if($request->get('filter', 'all') != 'path'): ?>display: none<?php endif; ?>" type="text" class="text-s" placeholder="" value="<?php echo htmlspecialchars($request->path); ?>" name="path" />
-                            <select name="type">
-                                <option <?php if($request->type == 1): ?> selected="true" <?php endif; ?>value="1"><?php _e('默认（仅人类）'); ?></option>
-                                <option <?php if($request->type == 2): ?> selected="true" <?php endif; ?>value="2"><?php _e('筛选（仅爬虫）'); ?></option>
-                                <option <?php if($request->type == 3): ?> selected="true" <?php endif; ?>value="3"><?php _e('所有'); ?></option>
-                            </select>
-                                <input type="hidden" name="page" value="1">
+                            <label>
+                                <select name="filter">
+                                    <option <?php if($request->filter == 'all'): ?> selected="true" <?php endif; ?>value="all"><?php _e('全部条件'); ?></option>
+                                    <option <?php if($request->filter == 'ip'): ?> selected="true" <?php endif; ?>value="ip"><?php _e('按IP'); ?></option>
+                                    <option <?php if($request->filter == 'post'): ?> selected="true" <?php endif; ?>value="post"><?php _e('按文章'); ?></option>
+                                    <option <?php if($request->filter == 'path'): ?> selected="true" <?php endif; ?>value="path"><?php _e('按路由'); ?></option>
+                                </select>
+                            </label>
+                            <label>
+                                <input style="<?php if($request->get('filter', 'all') != 'ip'): ?>display: none<?php endif; ?>" type="text" class="text-s" placeholder="" value="<?php echo htmlspecialchars($request->ip); ?>" name="ip" />
+                            </label>
+                            <label>
+                                <select style="<?php if($request->get('filter', 'all') != 'post'): ?>display: none<?php endif; ?>" name="cid">
+                                    <?php foreach ($access->logs['cidList'] as $content):?>
+                                    <option <?php if($request->cid == $content['cid']): ?> selected="true" <?php endif; ?>value="<?php echo $content['cid'];?>"><?php echo $content['title'];?> (<?php echo $content['count'];?>)</option>
+                                    <?php endforeach;?>
+                                </select>
+                            </label>
+                            <label>
+                                <input style="<?php if($request->get('filter', 'all') != 'path'): ?>display: none<?php endif; ?>" type="text" class="text-s" placeholder="" value="<?php echo htmlspecialchars($request->path); ?>" name="path" />
+                            </label>
+                            <label>
+                                <select name="type">
+                                    <option <?php if($request->type == 1): ?> selected="true" <?php endif; ?>value="1"><?php _e('默认（仅人类）'); ?></option>
+                                    <option <?php if($request->type == 2): ?> selected="true" <?php endif; ?>value="2"><?php _e('筛选（仅爬虫）'); ?></option>
+                                    <option <?php if($request->type == 3): ?> selected="true" <?php endif; ?>value="3"><?php _e('所有'); ?></option>
+                                </select>
+                            </label>
+                            <input type="hidden" name="page" value="1">
                                 <button type="button" class="btn btn-s"><?php _e('筛选'); ?></button>
                         </div>
                     </form>
@@ -94,7 +104,7 @@ $access = new Access_Core();
                             <?php if(!empty($access->logs['list'])): ?>
                             <?php foreach ($access->logs['list'] as $log): ?>
                             <tr id="<?php echo $log['id']; ?>" data-id="<?php echo $log['id']; ?>">
-                                <td><input type="checkbox" data-id="<?php echo $log['id']; ?>" value="<?php echo $log['id']; ?>" name="id[]"/></td>
+                                <td><label><input type="checkbox" data-id="<?php echo $log['id']; ?>" value="<?php echo $log['id']; ?>" name="id[]"/></label></td>
                                 <td><a target="_self" href="<?php $options->adminUrl('extending.php?panel=' . Access_Plugin::$panel . '&filter=path&path=' . $log['path'] . '&type='. $request->type); ?>"><?php echo urldecode(str_replace("%23", "#", $log['url'])); ?></a></td>
                                 <td><a data-action="ua" href="#" title="<?php echo $log['ua'];?>"><?php echo $log['display_name']; ?></a></td>
                                 <td><a data-action="ip" data-ip="<?php echo $access->long2ip($log['ip']); ?>" href="#"><?php echo $access->long2ip($log['ip']); ?></a><?php if($request->filter != 'ip'): ?> <a target="_self" href="<?php $options->adminUrl('extending.php?panel=' . Access_Plugin::$panel . '&filter=ip&ip=' . $access->long2ip($log['ip']) . '&type='. $request->type); ?>">[ ? ]</a><?php endif; ?></td>
@@ -120,7 +130,7 @@ $access = new Access_Core();
                             <div class="btn-group btn-drop">
                                 <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only"><?php _e('操作'); ?></i><?php _e('选中项'); ?> <i class="i-caret-down"></i></button>
                                 <ul class="dropdown-menu">
-                                    <li><a data-action="delete" href="javascript:;"><?php _e('删除'); ?></a></li>
+                                    <li><a data-action="delete" href="javascript:"><?php _e('删除'); ?></a></li>
                                 </ul>
                             </div>
                         </div>
