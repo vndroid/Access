@@ -413,6 +413,7 @@ class Access_Core
     {
         $ip_n = inet_pton($ipv6);
         $bits = 15; // 16 x 8 bit = 128bit
+        $ipv6long = '';
         while ($bits >= 0) {
             $bin = sprintf("%08b", (ord($ip_n[$bits])));
             $ipv6long = $bin.$ipv6long;
