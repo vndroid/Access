@@ -4,6 +4,12 @@
 
 Record typecho system access logs and analytics.
 
+## Thanks
+
+Thanks a lot for the ide support from [jetbrains](https://jb.gg/OpenSourceSupport).
+
+![LOGO](https://resources.jetbrains.com/storage/products/company/brand/logos/PhpStorm.png)
+
 ## Intro
 
 Current Version: [CHANGELOG](/CHANGELOG)
