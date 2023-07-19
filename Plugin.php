@@ -77,7 +77,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
             '1' => '后端',
         ), '1', '统计类型', '日志写入类型（若选择为前端方式，如果使用了 PJAX，请在 PJAX 相关事件中调用 window.Access.track() 方法），若写入速度较慢可选择前端写入日志。');
         $isOversea = new Typecho_Widget_Helper_Form_Element_Radio(
-            'writeType', array(
+            'isOversea', array(
             '0' => '国内',
             '1' => '海外',
         ), '1', '部署地点', 'IP 归属地判断使用了多种接口，国内接口在海外机器上部署无法使用，请根据情况进行选择');
