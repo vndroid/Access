@@ -36,17 +36,16 @@ class Access_Ip
             self::init();
         }
 
-        $url = 'https://freeapi.ipip.net/';
+        $url = 'http://ip-api.com/json/';
         $request = $url . $nip;
         $ch = curl_init();
         #curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         #curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_URL, $request);
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4685.0 Safari/537.36');
         $result = json_decode(curl_exec($ch), true);
-        return array(
-            $result['0'] . ' ' . $result['1'] . ' ' . $result['2'],
-        );
+        return array($result['country'] . ' ' . $result['city']);
     }
 
     private static function init(): void
