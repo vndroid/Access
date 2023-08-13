@@ -192,7 +192,7 @@ class Access_Core
      * @access protected
      * @return void
      */
-    protected function parseOverview()
+    protected function parseOverview(): void
     {
         $types = ['today', 'yesterday', 'month'];
         # 分类分时段统计数据
