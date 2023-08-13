@@ -91,7 +91,7 @@ class Access_UA {
     }
 
     public static function filter($str) {
-        return self::removeSpace(strtolower($str));
+        return self::removeSpace(strtolower($str ?: ""));
     }
 
     protected static function removeSpace($str) {
