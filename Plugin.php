@@ -161,7 +161,11 @@ class Access_Plugin implements Typecho_Plugin_Interface
                         }
                     }
                     $db->query("DROP TABLE `{$prefix}access`;", Typecho_Db::WRITE);
-                    $msg = _t('成功创建数据表并更新数据，插件启用成功，') . $configLink;
+                    $msg = _t('检测到旧版数据残留，已更新数据表，插件启用成功，') . $configLink;
+                }
+                # 如果已经存在新版数据则跳过
+                if ($db->fetchRow($db->query("SHOW TABLES LIKE '{$prefix}access';", Typecho_Db::READ))) {
+                    $msg = _t('数据表已存在，插件启用成功，') . $configLink;
                 }
                 return $msg;
             } catch (Typecho_Db_Exception $e) {
