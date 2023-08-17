@@ -284,14 +284,18 @@ $(document).ready(function() {
             dataType: 'json',
             data: {ip: $(this).data('ip')},
             success: function(data) {
-                if (data.code == 0) {
-                    swal('IP 查询成功', data.data, 'success');
+                if (data.code === 0) {
+                    swal({
+                        title: "IP 查询成功",
+                        text: "[" + data.data.country + "]" + "[" + data.data.regionName + "]",
+                        icon: "success",
+                    });
                 } else {
                     swal('IP 查询失败', data.data, 'warning');
                 }
             },
             error: function() {
-                swal('IP查询失败', '网络异常或 PHP 环境配置异常', 'warning');
+                swal('IP查询失败', '网络异常或 PHP 环境配置异常', 'error');
             }
         });
         return false;

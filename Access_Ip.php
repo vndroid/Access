@@ -15,17 +15,25 @@ class Access_Ip
 
     private static $cached = array();
 
-    public static function find($ip)
+    public static function find($ip): array
     {
         if (empty($ip) === TRUE) {
-            return 'N/A';
+            return array(
+                "status" => "failure",
+                "country" => null,
+                "city" => null,
+            );
         }
 
         $nip = gethostbyname($ip);
         $ipdot = explode('.', $nip);
 
         if ($ipdot[0] < 0 || $ipdot[0] > 255 || count($ipdot) !== 4) {
-            return 'N/A';
+            return array(
+                "status" => "failure",
+                "country" => null,
+                "city" => null,
+            );
         }
 
         if (isset(self::$cached[$nip]) === true) {
@@ -45,7 +53,17 @@ class Access_Ip
         curl_setopt($ch, CURLOPT_URL, $request);
         curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4685.0 Safari/537.36');
         $result = json_decode(curl_exec($ch), true);
-        return array($result['country'] . ' ' . $result['city']);
+        return array(
+            'status' => $result['status'],
+            'country' => $result['country'],
+            'countryCode' => $result['countryCode'],
+            'region' => $result['region'],
+            'regionName' => $result['regionName'],
+            'city' => $result['city'],
+            'zip' => $result['zip'],
+            'timezone' => $result['timezone'],
+            'query' => $result['query'],
+        );
     }
 
     private static function init(): void
@@ -62,7 +80,6 @@ class Access_Ip
     {
         if (self::$fp !== NULL) {
             fclose(self::$fp);
-
             self::$fp = NULL;
         }
     }
