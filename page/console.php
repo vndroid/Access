@@ -377,10 +377,10 @@ $(document).ready(function() {
 </script>
 <script src="<?php $options->pluginUrl('Access/sweetalert/sweetalert.min.js')?>"></script>
 <?php if($access->action == 'overview'):?>
-<script src="<?php $options->pluginUrl('Access/highcharts/highcharts.js')?>"></script>
-<script src="<?php $options->pluginUrl('Access/highcharts/modules/series-label.js')?>"></script>
-<script src="<?php $options->pluginUrl('Access/highcharts/modules/exporting.js')?>"></script>
-<script src="<?php $options->pluginUrl('Access/highcharts/modules/export-data.js')?>"></script>
+<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.0.1/highcharts.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.0.1/modules/series-label.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.0.1/modules/exporting.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.0.1/modules/export-data.src.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script type="text/javascript">
     chartData = <?php echo $access->overview['chart_data'] ?>;
     printChart = function(target, data) {
