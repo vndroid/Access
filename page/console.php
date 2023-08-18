@@ -92,7 +92,7 @@ $access = new Access_Core();
                         </colgroup>
                         <thead>
                             <tr>
-                                <th> </th>
+                                <th>\</th>
                                 <th><?php _e('Path'); ?></th>
                                 <th><?php _e('UA'); ?></th>
                                 <th><?php _e('IP'); ?></th>
