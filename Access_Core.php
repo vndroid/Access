@@ -549,9 +549,10 @@ class Access_Core
      * 解析archive对象
      *
      * @access public
+     * @param $archive
      * @return array
      */
-    public function parseArchive($archive)
+    public function parseArchive($archive): array
     {
         // 暂定首页的meta_id为0
         $content_id = null;
