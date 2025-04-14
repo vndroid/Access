@@ -14,7 +14,7 @@ class Access_UA {
         'BingPreview',              // 必应预览
         'ChatGPT-User',             // OpenAI
         'Custo',
-        'DNSPod-Monitor',
+        'DNSPod-Monitor',           // DNSPod D监控
         'DuckDuckBot',              // DuckDuckGo
         'DuckDuckGo-Favicons-Bot',  // DuckDuckGo Favicons
         'Exabot',
@@ -34,7 +34,7 @@ class Access_UA {
         'Perl tool',
         'Presto',                   // SQL 注入程序
         'Python-urllib',
-        'Reeder',
+        'Reeder',                   // RSS 阅读器
         'Scrapy',
         'Sogou Spider',
         'Sogou inst spider',
@@ -44,7 +44,7 @@ class Access_UA {
         'StackRambler',
         'SurveyBot',
         'TencentTraveler',
-        'Tiny Tiny RSS',
+        'Tiny Tiny RSS',            // RSS 阅读器
         'UptimeRobot',              // UptimeRobot
         'Voila',
         'WGet tools',
@@ -60,7 +60,7 @@ class Access_UA {
         'crawler',
         'gce-spider',               // Google App Engine Software
         'ia_archiver',              // Alexa Bot
-        'inoreader',
+        'inoreader',                // RSS 阅读器
         'larbin',
         'legs',
         'lwp-trivial',
