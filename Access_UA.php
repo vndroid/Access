@@ -5,69 +5,69 @@ if (!defined('__ACCESS_PLUGIN_ROOT__')) {
 
 class Access_UA {
     private static array $robots = array(
+        'Alexa (IA Archiver)',
+        'AppEngine-Google',
+        'Ask',
+        'BSpider',
+        'BaiDuSpider',
+        'Baiduspider',              // 百度蜘蛛
+        'BingPreview',              // 必应预览
+        'Custo',
+        'DNSPod-Monitor',
         'DuckDuckBot',              // DuckDuckGo
         'DuckDuckGo-Favicons-Bot',  // DuckDuckGo Favicons
-        'gce-spider',               // Google App Engine Software
-        'YisouSpider',              // 宜搜
-        'YandexBot',                // Yandex
-        'UptimeRobot',              // UptimeRobot
-        'Nimbostratus-Bot',
-        'Presto',                   // SQL 注入程序
-        'TencentTraveler',
-        'Baiduspider',              // 百度蜘蛛
-        'Googlebot',
-        'BingPreview',              // 必应预览
-        'msnbot',
-        'Sosospider+',
-        'Sogou web spider',
-        'Sogou inst spider',
-        'ia_archiver',              // Alexa Bot
-        'Yahoo! Slurp',
-        'YoudaoBot',
-        'Yahoo Slurp',
-        'MSNBot',
-        'Java (Often spam bot)',
-        'BaiDuSpider',
-        'Voila',
-        'Yandex bot',
-        'AppEngine-Google',
-        'BSpider',
-        'twiceler',
-        'Sogou Spider',
-        'Speedy Spider',
-        'Google AdSense',
-        'Heritrix',
-        'Python-urllib',
-        'Alexa (IA Archiver)',
-        'Ask',
         'Exabot',
-        'Custo',
+        'Fish search',
+        'Go-http-client',
+        'Google AdSense',
+        'Googlebot',
+        'Heritrix',
+        'Java (Often spam bot)',
+        'MJ12bot',
+        'MSIECrawler',
+        'MSNBot',
+        'Netcraft',
+        'Nimbostratus-Bot',
+        'Nutch',
         'OutfoxBot/YodaoBot',
-        'yacy',
+        'Perl tool',
+        'Presto',                   // SQL 注入程序
+        'Python-urllib',
+        'Reeder',
+        'Scrapy',
+        'Sogou Spider',
+        'Sogou inst spider',
+        'Sogou web spider',
+        'Sosospider+',
+        'Speedy Spider',
+        'StackRambler',
         'SurveyBot',
+        'TencentTraveler',
+        'Tiny Tiny RSS',
+        'UptimeRobot',              // UptimeRobot
+        'Voila',
+        'WGet tools',
+        'WordPress',
+        'Yahoo Slurp',
+        'Yahoo! Slurp',
+        'Yandex bot',
+        'YandexBot',                // Yandex
+        'YisouSpider',              // 宜搜
+        'YoudaoBot',
+        'aiohttp',
+        'bingbot',
+        'crawler',
+        'gce-spider',               // Google App Engine Software
+        'ia_archiver',              // Alexa Bot
+        'inoreader',
+        'larbin',
         'legs',
         'lwp-trivial',
-        'Nutch',
-        'StackRambler',
-        'Perl tool',
-        'MJ12bot',
-        'Netcraft',
-        'MSIECrawler',
-        'WGet tools',
-        'larbin',
-        'Fish search',
-        'crawler',
-        'bingbot',
-        'Go-http-client',
-        'zgrab',
-        'WordPress',
-        'Scrapy',
-        'DNSPod-Monitor',
-        'Reeder',
-        'Tiny Tiny RSS',
-        'inoreader',
+        'msnbot',
         'python-requests',
-        'aiohttp',
+        'twiceler',
+        'yacy',
+        'zgrab',
     );
 
     private string $ua;
