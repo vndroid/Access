@@ -12,6 +12,7 @@ class Access_UA {
         'BaiDuSpider',
         'Baiduspider',              // 百度蜘蛛
         'BingPreview',              // 必应预览
+        'ChatGPT-User',             // OpenAI
         'Custo',
         'DNSPod-Monitor',
         'DuckDuckBot',              // DuckDuckGo
