@@ -86,8 +86,8 @@ class Access_UA {
     private ?string $browserName = null;
     private ?string $browserVersion = null;
 
-    function __construct($ua) {
-        $this->ua = $ua;
+    function __construct(?string $ua) {
+        $this->ua = $ua ?? '';
         $this->ual = $this->filter($ua);
     }
 
