@@ -562,9 +562,13 @@ class Access_Core
         } elseif ($archive->is('post') || $archive->is('page')) {
             $content_id = $archive->cid;
         } elseif ($archive->is('tag')) {
-            $meta_id = $archive->tags[0]['mid'];
+            if (is_array($archive->tags) && !empty($archive->tags)) {
+                $meta_id = $archive->tags[0]['mid'];
+            }
         } elseif ($archive->is('category')) {
-            $meta_id = $archive->categories[0]['mid'];
+            if (is_array($archive->categories) && !empty($archive->categories)) {
+                $meta_id = $archive->categories[0]['mid'];
+            }
         } elseif ($archive->is('archive', 404)) {}
 
         return array(
