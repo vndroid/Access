@@ -1,3 +1,7 @@
-.typecho-list-table{
+.typecho-list-table {
     table-layout: inherit;
+}
+
+div form.search-form {
+    display: flex;
 }
