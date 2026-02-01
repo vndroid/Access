@@ -138,11 +138,12 @@ class Access_Core
         )));
         $this->logs['page'] = $page->show();
 
-        $this->logs['cidList'] = $this->db->fetchAll($this->db->select('DISTINCT content_id as cid, COUNT(1) as count, table.contents.title')
+        $this->logs['cidList'] = $this->db->fetchAll($this->db->select('DISTINCT content_id as cid, COUNT(1) as count, table.contents.title as title')
                 ->from('table.access')
                 ->join('table.contents', 'table.access.content_id = table.contents.cid')
-                ->where('table.access.content_id <> ?', null)
+                ->where('table.access.content_id IS NOT NULL')
                 ->group('table.access.content_id')
+                ->group('table.contents.title')
                 ->order('count', Typecho_Db::SORT_DESC));
     }
 
