@@ -5,7 +5,7 @@ include 'menu.php';
 require_once __DIR__ . '/../Access_Bootstrap.php';
 $access = new Access_Core();
 ?>
-<link rel="stylesheet" href="<?php $options->pluginUrl('Access/css/style.css?v=2.3.9')?>">
+<link rel="stylesheet" href="<?php $options->pluginUrl('Access/css/style.css?v=2.4.0')?>">
 <link rel="stylesheet" href="<?php $options->pluginUrl('Access/sweetalert/sweetalert.css')?>">
 <div class="main">
     <div class="body container">
