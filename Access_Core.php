@@ -142,6 +142,7 @@ class Access_Core
                 ->from('table.access')
                 ->join('table.contents', 'table.access.content_id = table.contents.cid')
                 ->where('table.access.content_id IS NOT NULL')
+                ->where('table.contents.type = ?', 'post')
                 ->group('table.access.content_id')
                 ->group('table.contents.title')
                 ->order('count', Typecho_Db::SORT_DESC));
