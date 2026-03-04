@@ -279,24 +279,29 @@ class Core
      */
     protected function parseReferer()
     {
-        // 尝试从 Redis 缓存读取
-        $cached = $this->getCache('referer');
-        if ($cached !== null) {
-            $this->referer = $cached;
-            return;
-        }
-
-        // 缓存未命中，从数据库查询
-        $this->referer['url'] = $this->db->fetchAll($this->db->select('DISTINCT entrypoint AS value, COUNT(1) as count')
+        // ── 来源 URL ──
+        $cachedUrl = $this->getCache('referer:url');
+        if ($cachedUrl !== null) {
+            $this->referer['url'] = $cachedUrl;
+        } else {
+            $this->referer['url'] = $this->db->fetchAll($this->db->select('DISTINCT entrypoint AS value, COUNT(1) as count')
                 ->from('table.access')->where("entrypoint <> ''")->group('entrypoint')
                 ->order('count', Db::SORT_DESC)->limit($this->config->pageSize));
-        $this->referer['domain'] = $this->db->fetchAll($this->db->select('DISTINCT entrypoint_domain AS value, COUNT(1) as count')
+            $this->referer['url'] = $this->htmlEncode($this->urlDecode($this->referer['url']));
+            $this->setCache('referer:url', $this->referer['url']);
+        }
+
+        // ── 来源域名 ──
+        $cachedDomain = $this->getCache('referer:domain');
+        if ($cachedDomain !== null) {
+            $this->referer['domain'] = $cachedDomain;
+        } else {
+            $this->referer['domain'] = $this->db->fetchAll($this->db->select('DISTINCT entrypoint_domain AS value, COUNT(1) as count')
                 ->from('table.access')->where("entrypoint_domain <> ''")->group('entrypoint_domain')
                 ->order('count', Db::SORT_DESC)->limit($this->config->pageSize));
-        $this->referer = $this->htmlEncode($this->urlDecode($this->referer));
-
-        // 写入 Redis 缓存
-        $this->setCache('referer', $this->referer);
+            $this->referer['domain'] = $this->htmlEncode($this->urlDecode($this->referer['domain']));
+            $this->setCache('referer:domain', $this->referer['domain']);
+        }
     }
 
     /**
