@@ -204,7 +204,7 @@ class Core
                 return;
             }
 
-            $password = $this->config->redisPassword ?? '';
+            $password = $this->config->redisAuth ?? '';
             if ($password !== '') {
                 $redis->auth($password);
             }
@@ -256,7 +256,7 @@ class Core
         }
 
         try {
-            $ttl = (int)($this->config->redisTtl ?: 300);
+            $ttl = (int)($this->config->redisKeyTTL ?: 86400);
             $this->redis->setex(
                 self::CACHE_PREFIX . $key,
                 $ttl,

@@ -119,18 +119,18 @@ class Plugin implements PluginInterface
         );
         $redisHost = new Text(
             'redisHost', null, '127.0.0.1',
-            'Redis 地址', 'Redis 服务地址'
+            'Redis 地址', 'Redis 服务地址，默认为 127.0.0.1'
         );
         $redisPort = new Text(
             'redisPort', null, '6379',
-            'Redis 端口', 'Redis 服务端口'
+            'Redis 端口', 'Redis 服务端口，默认为 6379'
         );
-        $redisPassword = new Text(
-            'redisPassword', null, '',
-            'Redis 密码', 'Redis 认证密码，无密码则留空'
+        $redisAuth = new Text(
+            'redisAuth', null, '',
+            'Redis 认证', 'Redis 服务密码，默认留空无密码'
         );
-        $redisTtl = new Text(
-            'redisTtl', null, '86400',
+        $redisKeyTTL = new Text(
+            'redisKeyTTL', null, '86400',
             '缓存时间（秒）', '来源统计数据的缓存过期时间，默认 86400 秒（一天），过期后自动从数据库刷新'
         );
         $form->addInput($pageSize);
@@ -140,8 +140,8 @@ class Plugin implements PluginInterface
         $form->addInput($redisCache);
         $form->addInput($redisHost);
         $form->addInput($redisPort->addRule('isInteger', _t('端口必须为纯数字')));
-        $form->addInput($redisPassword);
-        $form->addInput($redisTtl);
+        $form->addInput($redisAuth);
+        $form->addInput($redisKeyTTL);
     }
 
     /**
