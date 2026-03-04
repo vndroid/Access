@@ -45,7 +45,7 @@ class Ip
         if ($token !== '') {
             $result = self::queryIpInfo($nip, $token);
         } else {
-            $result = self::queryKeycdn($nip);
+            $result = self::queryKeyCdn($nip);
         }
 
         if ($result['status'] === 'success') {
@@ -56,16 +56,26 @@ class Ip
     }
 
     /**
-     * 通过 ipinfo.io core 接口查询
+     * 通过 IPinfo Core 接口查询地址详情
      */
     private static function queryIpInfo(string $ip, string $token): array
     {
+        $config = Options::alloc()->plugin(basename(__DIR__));
         $url = 'https://api.ipinfo.io/lookup/' . $ip . '?token=' . $token;
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_TIMEOUT, 5);
         curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4685.0 Safari/537.36');
+        $proxy = $config->socks5Host ?? '';
+        if ($proxy !== '') {
+            curl_setopt($ch, CURLOPT_PROXY, $proxy);
+            curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5_HOSTNAME);
+            $auth = $config->socks5Auth ?? '';
+            if ($auth !== '') {
+                curl_setopt($ch, CURLOPT_PROXYUSERPWD, $auth);
+            }
+        }
         $body = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
@@ -99,14 +109,24 @@ class Ip
     /**
      * 通过 keycdn 接口查询（免费 fallback）
      */
-    private static function queryKeycdn(string $ip): array
+    private static function queryKeyCdn(string $ip): array
     {
+        $config = Options::alloc()->plugin(basename(__DIR__));
         $url = 'https://tools.keycdn.com/geo.json?host=' . $ip;
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_TIMEOUT, 5);
         curl_setopt($ch, CURLOPT_USERAGENT, 'keycdn-tools:https://www.bing.com');
+        $proxy = $config->socks5Host ?? '';
+        if ($proxy !== '') {
+            curl_setopt($ch, CURLOPT_PROXY, $proxy);
+            curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5_HOSTNAME);
+            $auth = $config->socks5Auth ?? '';
+            if ($auth !== '') {
+                curl_setopt($ch, CURLOPT_PROXYUSERPWD, $auth);
+            }
+        }
         $body = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
