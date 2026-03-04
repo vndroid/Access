@@ -159,6 +159,10 @@ class Plugin implements PluginInterface
                 '1' => '其他国家或地区',
             ], '1', '部署地点', '访客 IP 归属地判断接口种类，中国大陆接口在海外机器可能无法使用，请根据实际情况进行选择'
         );
+        $ipInfoToken = new Text(
+            'ipInfoToken', null, '',
+            'IPinfo 接口令牌', 'IP 归属地查询接口令牌，请前往 <a href="https://ipinfo.io" target="_blank">ipinfo.io</a> 获取'
+        );
         $redisCache = new Radio(
             'redisCache', [
                 '0' => '禁用',
@@ -182,6 +186,7 @@ class Plugin implements PluginInterface
         $form->addInput($isDrop);
         $form->addInput($writeType);
         $form->addInput($isOversea);
+        $form->addInput($ipInfoToken);
         $form->addInput($redisCache);
         $form->addInput($redisHost);
         $form->addInput($redisPort->addRule('isInteger', _t('端口必须为纯数字')));
