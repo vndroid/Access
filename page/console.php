@@ -193,7 +193,7 @@ $access = new Core();
                     </table>
                 </div>
 
-               <h4 class="typecho-list-table-title">来源域名</h4>
+               <h4 class="typecho-list-table-title">来源域名 Top 20</h4>
 
                 <div class="typecho-table-wrap">
                     <table class="typecho-list-table">
@@ -206,7 +206,7 @@ $access = new Core();
                             <tr>
                                 <th>排名</th>
                                 <th>次数</th>
-                                <th>来源域名</th>
+                                <th>来源 DOMAIN</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -221,7 +221,7 @@ $access = new Core();
                     </table>
                 </div>
 
-               <h4 class="typecho-list-table-title">来源页</h4>
+               <h4 class="typecho-list-table-title">来源页面 Top 20</h4>
 
                 <div class="typecho-table-wrap">
                     <table class="typecho-list-table">
@@ -234,7 +234,7 @@ $access = new Core();
                             <tr>
                                 <th>排名</th>
                                 <th>次数</th>
-                                <th>来源URL</th>
+                                <th>来源 URL</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -257,10 +257,7 @@ $access = new Core();
                 <h4 class="typecho-list-table-title">当月图表</h4>
                 <div class="typecho-table-wrap" id="chart-month"></div>
             </div><!-- end .typecho-list -->
-
-
             <?php endif;?>
-
         </div><!-- end .typecho-page-main -->
     </div>
 </main>
