@@ -1,22 +1,26 @@
 <?php
-if (!defined('__ACCESS_PLUGIN_ROOT__')) {
-    throw new RuntimeException('Bootstrap File Not Found');
+
+namespace TypechoPlugin\Access;
+
+if (!defined('__TYPECHO_ROOT_DIR__')) {
+    exit;
 }
 
-class Access_UA {
-    private static array $robots = array(
+class UA
+{
+    private static array $robots = [
         'Alexa (IA Archiver)',
         'AppEngine-Google',
         'Ask',
         'BSpider',
         'BaiDuSpider',
-        'Baiduspider',              // 百度蜘蛛
-        'BingPreview',              // 必应预览
-        'ChatGPT-User',             // OpenAI
+        'Baiduspider',
+        'BingPreview',
+        'ChatGPT-User',
         'Custo',
-        'DNSPod-Monitor',           // DNSPod D监控
-        'DuckDuckBot',              // DuckDuckGo
-        'DuckDuckGo-Favicons-Bot',  // DuckDuckGo Favicons
+        'DNSPod-Monitor',
+        'DuckDuckBot',
+        'DuckDuckGo-Favicons-Bot',
         'Exabot',
         'Fish search',
         'Go-http-client',
@@ -32,9 +36,9 @@ class Access_UA {
         'Nutch',
         'OutfoxBot/YodaoBot',
         'Perl tool',
-        'Presto',                   // SQL 注入程序
+        'Presto',
         'Python-urllib',
-        'Reeder',                   // RSS 阅读器
+        'Reeder',
         'Scrapy',
         'Sogou Spider',
         'Sogou inst spider',
@@ -44,23 +48,23 @@ class Access_UA {
         'StackRambler',
         'SurveyBot',
         'TencentTraveler',
-        'Tiny Tiny RSS',            // RSS 阅读器
-        'UptimeRobot',              // UptimeRobot
+        'Tiny Tiny RSS',
+        'UptimeRobot',
         'Voila',
         'WGet tools',
         'WordPress',
         'Yahoo Slurp',
         'Yahoo! Slurp',
         'Yandex bot',
-        'YandexBot',                // Yandex
-        'YisouSpider',              // 宜搜
+        'YandexBot',
+        'YisouSpider',
         'YoudaoBot',
         'aiohttp',
         'bingbot',
         'crawler',
-        'gce-spider',               // Google App Engine Software
-        'ia_archiver',              // Alexa Bot
-        'inoreader',                // RSS 阅读器
+        'gce-spider',
+        'ia_archiver',
+        'inoreader',
         'larbin',
         'legs',
         'lwp-trivial',
@@ -69,53 +73,44 @@ class Access_UA {
         'twiceler',
         'yacy',
         'zgrab',
-    );
+    ];
 
     private string $ua;
     private string $ual;
-    
+
     private ?string $osID = null;
-    private ?string $osName	= null;
+    private ?string $osName = null;
     private ?string $osVersion = null;
-    
+
     private ?string $robotID = null;
     private ?string $robotName = null;
     private ?string $robotVersion = null;
-    
+
     private ?string $browserID = null;
     private ?string $browserName = null;
     private ?string $browserVersion = null;
 
-    function __construct(?string $ua) {
+    public function __construct(?string $ua)
+    {
         $this->ua = $ua ?? '';
-        $this->ual = $this->filter($ua);
+        $this->ual = self::filter($ua);
     }
 
-    public static function filter($str) {
+    public static function filter(?string $str): string
+    {
         return self::removeSpace(strtolower($str ?: ""));
     }
 
-    protected static function removeSpace($str) {
+    protected static function removeSpace(string $str): string
+    {
         return preg_replace('/\s+/', '', $str);
     }
 
-    /**
-     * 获取完整UA信息
-     *
-     * @access public
-     * @return string
-     */
     public function getUA(): string
     {
         return $this->ua;
     }
 
-    /**
-     * 获取是否是爬虫
-     *
-     * @access public
-     * @return bool
-     */
     public function isRobot(): bool
     {
         if ($this->robotID === null) {
@@ -125,46 +120,28 @@ class Access_UA {
                     $this->robotVersion = $matches[2];
                 }
                 foreach (self::$robots as $val) {
-                    if (strpos($this->ual, $this->filter($val)) !== false) {
+                    if (str_contains($this->ual, self::filter($val))) {
                         $this->robotID = $this->robotName = $val;
                     }
                 }
             }
-            if ($this->robotID		== null) $this->robotID			= '';
-            if ($this->robotName	== null) $this->robotName		= '';
-            if ($this->robotVersion	== null) $this->robotVersion	= '';
+            if ($this->robotID === null) $this->robotID = '';
+            if ($this->robotName === null) $this->robotName = '';
+            if ($this->robotVersion === null) $this->robotVersion = '';
         }
         return $this->robotID !== '';
     }
 
-    /**
-     * 获取爬虫ID
-     *
-     * @access public
-     * @return string
-     */
-    public function getRobotID(): ?string
+    public function getRobotID(): string
     {
         return $this->isRobot() ? $this->robotID : '';
     }
 
-    /**
-     * 获取爬虫版本
-     *
-     * @access public
-     * @return string
-     */
-    public function getRobotVersion(): ?string
+    public function getRobotVersion(): string
     {
         return $this->isRobot() ? $this->robotVersion : '';
     }
 
-    /**
-     * 解析操作系统信息
-     *
-     * @access private
-     * @return bool
-     */
     private function parseOS(): bool
     {
         if ($this->osID === null) {
@@ -208,10 +185,10 @@ class Access_UA {
             } elseif (preg_match('/Mac OS X ([0-9_]+)/i', $this->ua, $matches)) {
                 $this->osID = $this->osName = 'Mac OS X';
                 $this->osVersion = str_replace('_', '.', $matches[1]);
-            } elseif (preg_match('/Linux/i', $this->ua, $matches)) {
+            } elseif (preg_match('/Linux/i', $this->ua)) {
                 $this->osID = $this->osName = 'Linux';
                 $this->osVersion = '';
-            } elseif (preg_match('/Ubuntu/i', $this->ua, $matches)) {
+            } elseif (preg_match('/Ubuntu/i', $this->ua)) {
                 $this->osID = $this->osName = 'Ubuntu';
                 $this->osVersion = '';
             } elseif (preg_match('/CrOS i686 ([a-zA-Z0-9.]+)/i', $this->ua, $matches)) {
@@ -229,50 +206,25 @@ class Access_UA {
         return $this->osID !== '' || $this->osName !== '';
     }
 
-    /**
-     * 获取操作系统ID
-     *
-     * @access public
-     * @return string
-     */
-    public function getOSID(): ?string
+    public function getOSID(): string
     {
         return $this->parseOS() ? $this->osID : '';
     }
 
-    /**
-     * 获取操作系统名字
-     *
-     * @access public
-     * @return string
-     */
-    public function getOSName(): ?string
+    public function getOSName(): string
     {
         return $this->parseOS() ? $this->osName : '';
     }
 
-    /**
-     * 获取操作系统版本号
-     *
-     * @access public
-     * @return string
-     */
-    public function getOSVersion(): ?string
+    public function getOSVersion(): string
     {
         return $this->parseOS() ? $this->osVersion : '';
     }
 
-    /**
-     * 解析浏览器信息
-     *
-     * @access private
-     * @return bool
-     */
     private function parseBrowser(): bool
     {
         if ($this->browserName === null) {
             if (preg_match('#SE 2([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // PC SoGou Browser
                 $this->browserID = 'SE2';
                 $this->browserName = '搜狗浏览器 2';
                 $this->browserVersion = $matches[1];
@@ -285,7 +237,6 @@ class Access_UA {
                 $this->browserName = '搜狗浏览器';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#baiduboxapp/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // BaiduApp Android / iOS
                 $this->browserID = 'BaiduBoxApp';
                 $this->browserName = '手机百度';
                 $this->browserVersion = $matches[1];
@@ -294,62 +245,50 @@ class Access_UA {
                 $this->browserName = '猎豹浏览器';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#baidubrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Baidu Browser Android
                 $this->browserID = 'BaiduBrowser';
                 $this->browserName = '百度浏览器';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#MicroMessenger/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // WeChat inside Browser
                 $this->browserID = 'WeChat';
                 $this->browserName = 'WeChat';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#OPRGX/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Opera Gaming Browser PC
                 $this->browserID = 'Opera GX';
                 $this->browserName = 'Opera GX';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#FxiOS/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Firefox Focus
                 $this->browserID = 'FxiOS';
                 $this->browserName = 'Firefox Focus';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#2345Explorer/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // 2345Explorer Browser PC
                 $this->browserID = '2345E';
                 $this->browserName = '2345Explorer';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#OPR/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Opera Android / iOS
                 $this->browserID = 'OPR';
                 $this->browserName = 'Opera';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#OPT/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Opera Touch Android / iOS
                 $this->browserID = 'OPT';
                 $this->browserName = 'Opera Touch';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#Vivaldi/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Vivaldi macOS / PC
                 $this->browserID = 'Vivaldi';
                 $this->browserName = 'Vivaldi';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#(MQQBrowser|QQBrowser)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // QQ Browser Android / PC & macOS
                 $this->browserID = 'QQBrowser';
                 $this->browserName = 'QQ浏览器';
                 $this->browserVersion = $matches[2];
             } elseif (preg_match('#QQ/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // MobileQQ Android
                 $this->browserID = 'MobileQQ';
                 $this->browserName = '手机QQ';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#Thunder/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // ThunderX PC
                 $this->browserID = 'ThunderX';
                 $this->browserName = '迅雷X';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#Qiyu/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Qiyu Android / iOS / PC
                 $this->browserID = 'Qiyu';
                 $this->browserName = '旗鱼浏览器';
                 $this->browserVersion = $matches[1];
@@ -358,47 +297,38 @@ class Access_UA {
                 $this->browserName = 'Yandex';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#UCTurbo/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Quark International Edition
                 $this->browserID = 'UCTurbo';
                 $this->browserName = 'UCTurbo';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#(UCBrowser|UBrowser|UCWEB)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // UCMobile Android / Symbian & BlackBerry and older version
                 $this->browserID = 'UCBrowser';
                 $this->browserName = 'UC浏览器';
                 $this->browserVersion = $matches[2];
             } elseif (preg_match('#MailMaster/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Netease MailMaster Client
                 $this->browserID = 'MailMaster';
                 $this->browserName = '网易邮箱大师';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#Quark/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Quark Android / iOS
                 $this->browserID = 'Quark';
                 $this->browserName = 'Quark';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#SamsungBrowser/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Samsung Phone Browser Android
                 $this->browserID = 'SamsungBrowser';
                 $this->browserName = '三星浏览器';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#SogouSearch.*/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // SogouSearch Android
                 $this->browserID = 'SogouSearch';
                 $this->browserName = '搜狗搜索';
                 $this->browserVersion = $matches[1];
-            } elseif (preg_match('#Maxthon( |\/)([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Maxthon Android
+            } elseif (preg_match('#Maxthon([\s/])([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 $this->browserID = 'Maxthon';
                 $this->browserName = 'Maxthon';
                 $this->browserVersion = $matches[2];
             } elseif (preg_match('#XiaoMi/MiuiBrowser/([0-9.]+)#i', $this->ua, $matches)) {
-                // MIUI Browser
                 $this->browserID = 'MiuiBrowser';
                 $this->browserName = '小米浏览器';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#(Edg|Edge|EdgA|EdgiOS)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
-                // Edge Chromium / EdgeHTML / Android / iOS 
                 $this->browserID = $this->browserName = 'Edge';
                 $this->browserVersion = $matches[2];
             } elseif (preg_match('#Chrome/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
@@ -410,7 +340,7 @@ class Access_UA {
             } elseif (preg_match('#MSIE ([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 $this->browserID = $this->browserName = 'Internet Explorer';
                 $this->browserVersion = $matches[1];
-            } elseif (preg_match('#Trident#', $this->ua, $matches)) {
+            } elseif (preg_match('#Trident#', $this->ua)) {
                 $this->browserID = $this->browserName = 'Internet Explorer';
                 $this->browserVersion = '11';
             } elseif (preg_match('#(Firefox|Fenix|Phoenix|Firebird|BonEcho|GranParadiso|Minefield|Iceweasel)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
@@ -425,36 +355,19 @@ class Access_UA {
         return $this->browserID !== '' || $this->browserName !== '';
     }
 
-    /**
-     * 获取浏览器ID
-     *
-     * @access public
-     * @return string
-     */
-    public function getBrowserID(): ?string
+    public function getBrowserID(): string
     {
         return $this->parseBrowser() ? $this->browserID : '';
     }
 
-    /**
-     * 获取浏览器名字
-     *
-     * @access public
-     * @return string
-     */
-    public function getBrowserName(): ?string
+    public function getBrowserName(): string
     {
         return $this->parseBrowser() ? $this->browserName : '';
     }
 
-    /**
-     * 获取浏览器版本号
-     *
-     * @access public
-     * @return string
-     */
-    public function getBrowserVersion(): ?string
+    public function getBrowserVersion(): string
     {
         return $this->parseBrowser() ? $this->browserVersion : '';
     }
 }
+

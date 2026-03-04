@@ -1,15 +1,24 @@
 <?php
-require_once __DIR__ . '/Access_Bootstrap.php';
 
-class Access_Action extends Typecho_Widget implements Widget_Interface_Do
+namespace TypechoPlugin\Access;
+
+use Typecho\Widget;
+use Widget\ActionInterface;
+
+if (!defined('__TYPECHO_ROOT_DIR__')) {
+    exit;
+}
+
+class Action extends Widget implements ActionInterface
 {
-    private $access;
+    private ?Core $access = null;
 
-    public function __construct($request, $response, $params = null)
+    private function getAccess(): Core
     {
-        parent::__construct($request, $response, $params);
-
-        $this->access = new Access_Core();
+        if ($this->access === null) {
+            $this->access = new Core();
+        }
+        return $this->access;
     }
 
     public function execute()
@@ -24,8 +33,8 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
     {
         $image = base64_decode('R0lGODlhAQABAIAAAAAAAP///yH5BAQUAP8ALAAAAAABAAEAAAICRAEAOw==');
         $this->response->setContentType('image/gif');
-        if ($this->access->config->writeType == 1) {
-            $this->access->writeLogs(null, $this->request->u, $this->request->cid, $this->request->mid);
+        if ($this->getAccess()->config->writeType == 1) {
+            $this->getAccess()->writeLogs(null, $this->request->get('u'), $this->request->get('cid'), $this->request->get('mid'));
         }
         echo $image;
     }
@@ -35,11 +44,11 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
         $ip = $this->request->get('ip');
         try {
             $this->checkAuth();
-            $response = Access_Ip::find($ip);
+            $response = Ip::find($ip);
             if ($response['status'] === "success") {
-                $response = array(
+                $response = [
                     'code' => 0,
-                    'data' => array(
+                    'data' => [
                         'status' => $response['status'],
                         'country' => $response['country'],
                         'countryCode' => $response['countryCode'],
@@ -49,12 +58,12 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
                         'zip' => $response['zip'],
                         'timezone' => $response['timezone'],
                         'query' => $response['query'],
-                    ),
-                );
+                    ],
+                ];
             } else {
-                throw new RuntimeException('解析 IP 失败');
+                throw new \RuntimeException('解析 IP 失败');
             }
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
             try {
                 $url = 'https://tools.keycdn.com/geo.json?host=';
                 $request = $url . $ip;
@@ -64,9 +73,9 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
                 curl_setopt($ch, CURLOPT_URL, $request);
                 $result = json_decode(curl_exec($ch), true);
                 if ($result['status'] === 'success') {
-                    $response = array(
+                    $response = [
                         'code' => 0,
-                        'data' => array(
+                        'data' => [
                             'status' => $result['status'],
                             'country' => $result['data']['geo']['country_name'],
                             'countryCode' => $result['data']['geo']['country_code'],
@@ -76,14 +85,14 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
                             'postal_code' => $result['data']['geo']['postal_code'],
                             'timezone' => $result['data']['geo']['timezone'],
                             'query' => $result['data']['geo']['ip'],
-                        ),
-                    );
+                        ],
+                    ];
                 }
-            } catch (Exception $e) {
-                $response = array(
+            } catch (\Exception $e) {
+                $response = [
                     'code' => 500,
                     'data' => '很抱歉，IPAPI 查询无结果，同时服务器无法连接 fallback 接口(tools.keycdn.com)',
-                );
+                ];
             }
         }
         $this->response->throwJson($response);
@@ -94,20 +103,19 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
         try {
             $this->checkAuth();
             $data = @file_get_contents('php://input');
-            $data = Json::decode($data, true);
+            $data = json_decode($data, true);
             if (!is_array($data)) {
-                throw new RuntimeException('params invalid');
+                throw new \RuntimeException('params invalid');
             }
-            $this->access->deleteLogs($data);
-            $response = array(
+            $this->getAccess()->deleteLogs($data);
+            $response = [
                 'code' => 0,
-            );
-
-        } catch (Exception $e) {
-            $response = array(
+            ];
+        } catch (\Exception $e) {
+            $response = [
                 'code' => 100,
                 'data' => $e->getMessage(),
-            );
+            ];
         }
 
         $this->response->throwJson($response);
@@ -115,8 +123,8 @@ class Access_Action extends Typecho_Widget implements Widget_Interface_Do
 
     protected function checkAuth()
     {
-        if (!$this->access->isAdmin()) {
-            throw new RuntimeException('Access Denied');
+        if (!$this->getAccess()->isAdmin()) {
+            throw new \RuntimeException('Access Denied');
         }
     }
 
