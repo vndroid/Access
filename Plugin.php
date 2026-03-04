@@ -234,7 +234,7 @@ class Plugin implements PluginInterface
                         unset($row['date']);
                         try {
                             $db->query($db->insert('table.access')->rows($row));
-                        } catch (Db\Exception $e) {
+                        } catch (DbException $e) {
                             if ($e->getCode() != 23000) {
                                 throw new PluginException(_t('导入旧版数据失败，插件启用失败，错误信息：%s。', $e->getMessage()));
                             }
