@@ -159,9 +159,9 @@ class Plugin implements PluginInterface
                 '1' => 'Core',
             ], '0', 'IPinfo 接口类型', '默认使用 Lite（免费版），字段相比 Core（付费版）少'
         );
-        $ipInfoToken = new Text(
-            'ipInfoToken', null, '',
-            'IPinfo 接口令牌', 'IP 归属地查询接口令牌，请前往 <a href="https://ipinfo.io" target="_blank">ipinfo.io</a> 获取'
+        $isToken = new Text(
+            'isToken', null, '',
+            'IPinfo 接口令牌', '接口调用令牌，请前往 <a href="https://ipinfo.io/dashboard" target="_blank">IPinfo</a> 面板获取'
         );
         $socks5Host = new Text(
             'socks5Host', null, '',
@@ -194,7 +194,7 @@ class Plugin implements PluginInterface
         $form->addInput($isDrop);
         $form->addInput($writeType);
         $form->addInput($isPaid);
-        $form->addInput($ipInfoToken);
+        $form->addInput($isToken);
         $form->addInput($socks5Host);
         $form->addInput($socks5Auth);
         $form->addInput($redisCache);

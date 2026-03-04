@@ -41,7 +41,7 @@ class Ip
         }
 
         $config = Options::alloc()->plugin(basename(__DIR__));
-        $token = $config->ipInfoToken ?? '';
+        $token = $config->isToken ?? '';
 
         if ($token !== '') {
             $isPaid = $config->isPaid ?? '0';
