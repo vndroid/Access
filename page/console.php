@@ -236,7 +236,7 @@ include 'table-js.php';
     /* ==================== 常量 ==================== */
     var logsApiUrl     = '<?php echo rtrim(Helper::options()->index, '/') . '/access/logs/get.json'; ?>';
     var overviewApiUrl = '<?php echo rtrim(Helper::options()->index, '/') . '/access/overview.json'; ?>';
-    var ipApiUrl       = '<?php echo rtrim(Helper::options()->index, '/') . '/access/ip.json'; ?>';
+    var ipApiUrl       = '<?php echo rtrim(Helper::options()->index, '/') . '/access/geo.json'; ?>';
     var deleteApiUrl   = '<?php echo rtrim(Helper::options()->index, '/') . '/access/logs/delete.json'; ?>';
     var adminUrl       = '<?php echo rtrim(Helper::options()->adminUrl, '/'); ?>';
     var panelName      = '<?php echo AccessPlugin::$panel; ?>';

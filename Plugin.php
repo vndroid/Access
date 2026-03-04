@@ -47,8 +47,8 @@ class Plugin implements PluginInterface
         }
         $msg = self::install();
         Helper::addPanel(1, self::$panel, _t('访问统计'), _t('统计控制台'), 'subscriber');
-        Helper::addRoute('access_track_gif', '/access/log/track.gif', '\TypechoPlugin\Access\Action', 'writeLogs');
-        Helper::addRoute('access_ip_analyze', '/access/ip.json', '\TypechoPlugin\Access\Action', 'ipAnalyze');
+        Helper::addRoute('access_ip_geo', '/access/geo.json', '\TypechoPlugin\Access\Action', 'ipGeo');
+        Helper::addRoute('access_track_flag', '/access/track/flag.gif', '\TypechoPlugin\Access\Action', 'writeLogs');
         Helper::addRoute('access_logs_delete', '/access/logs/delete.json', '\TypechoPlugin\Access\Action', 'deleteLogs');
         Helper::addRoute('access_logs_overview', '/access/overview.json', '\TypechoPlugin\Access\Action', 'overview');
         Helper::addRoute('access_logs_details', '/access/logs/get.json', '\TypechoPlugin\Access\Action', 'logsParse');
@@ -81,8 +81,8 @@ class Plugin implements PluginInterface
             $cleanFlag = true;
         }
         Helper::removePanel(1, self::$panel);
-        Helper::removeRoute('access_track_gif');
-        Helper::removeRoute('access_ip_analyze');
+        Helper::removeRoute('access_ip_geo');
+        Helper::removeRoute('access_track_flag');
         Helper::removeRoute('access_logs_delete');
         Helper::removeRoute('access_logs_overview');
         Helper::removeRoute('access_logs_details');
@@ -358,7 +358,7 @@ class Plugin implements PluginInterface
             $index = rtrim(Helper::options()->index, '/');
             $access = new Core();
             $parsedArchive = $access->parseArchive($archive);
-            echo "<script type=\"text/javascript\">(function(w){var t=function(){var i=new Image();i.src='{$index}/access/log/track.gif?u='+location.pathname+location.search+location.hash+'&cid={$parsedArchive['content_id']}&mid={$parsedArchive['meta_id']}&rand='+new Date().getTime()};t();var a={};a.track=t;w.Access=a})(this);</script>";
+            echo "<script type=\"text/javascript\">(function(w){var t=function(){var i=new Image();i.src='{$index}/access/track/flag.gif?u='+location.pathname+location.search+location.hash+'&cid={$parsedArchive['content_id']}&mid={$parsedArchive['meta_id']}&rand='+new Date().getTime()};t();var a={};a.track=t;w.Access=a})(this);</script>";
         }
     }
 

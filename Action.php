@@ -40,7 +40,7 @@ class Action extends Widget implements ActionInterface
         echo $image;
     }
 
-    public function ipAnalyze(): void
+    public function ipGeo(): void
     {
         $this->checkAuth();
         $ip = $this->request->get('ip');
