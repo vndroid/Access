@@ -55,7 +55,7 @@ class Action extends Widget implements ActionInterface
             } else {
                 $response = [
                     'code' => 500,
-                    'data' => 'IP 查询失败',
+                    'data' => $result['error'] ?? 'IP 查询失败',
                 ];
             }
         } catch (\Exception $e) {

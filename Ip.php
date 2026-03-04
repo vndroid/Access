@@ -80,13 +80,19 @@ class Ip
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        if ($body === false || $httpCode !== 200) {
-            return ['status' => 'failure', 'country' => null, 'city' => null];
+        if ($body === false) {
+            return ['status' => 'failure', 'error' => 'cURL 请求失败', 'country' => null, 'city' => null];
+        }
+
+        if ($httpCode !== 200) {
+            $err = json_decode($body, true);
+            $msg = $err['error'] ?? ('HTTP ' . $httpCode);
+            return ['status' => 'failure', 'error' => $msg, 'country' => null, 'city' => null];
         }
 
         $json = json_decode($body, true);
         if (!is_array($json) || empty($json['ip'])) {
-            return ['status' => 'failure', 'country' => null, 'city' => null];
+            return ['status' => 'failure', 'error' => '响应数据异常', 'country' => null, 'city' => null];
         }
 
         return [
