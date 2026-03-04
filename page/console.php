@@ -33,8 +33,8 @@ $initAction = $access->action;
             <div class="col-mb-12 typecho-list">
                 <div class="typecho-list-operate">
                     <ul class="typecho-option-tabs" id="access-tabs">
-                        <li data-tab="overview"<?=($initAction == 'overview' ? ' class="current"' : '')?>><a href="javascript:;"><?php _e('访问概览'); ?></a></li>
-                        <li data-tab="logs"<?=($initAction == 'logs' ? ' class="current"' : '')?>><a href="javascript:;"><?php _e('访问日志'); ?></a></li>
+                        <li data-tab="overview"<?=($initAction == 'overview' ? ' class="current"' : '')?>><a href="#"><?php _e('访问概览'); ?></a></li>
+                        <li data-tab="logs"<?=($initAction == 'logs' ? ' class="current"' : '')?>><a href="#"><?php _e('访问日志'); ?></a></li>
                         <li><a href="<?php $options->adminUrl('options-plugin.php?config=Access') ?>"><?php _e('插件设置'); ?></a></li>
                     </ul>
                 </div>
@@ -52,7 +52,7 @@ $initAction = $access->action;
                         </div>
                     </div>
                     <div class="search" role="search">
-                        <a href="javascript:;" id="logs-clear-filter" style="display:none"><?php _e('&laquo; 取消筛选'); ?></a>
+                        <a href="#" id="logs-clear-filter" style="display:none"><?php _e('&laquo; 取消筛选'); ?></a>
                         <label>
                             <select name="filter" id="logs-filter">
                                 <option value="all"><?php _e('全部条件'); ?></option>
@@ -392,11 +392,11 @@ include 'table-js.php';
 
                         html += '<tr data-id="' + log.id + '">';
                         html += '<td><label><input type="checkbox" data-id="' + log.id + '" value="' + log.id + '" name="id[]"/></label></td>';
-                        html += '<td><a href="javascript:;" class="logs-filter-link" data-filter="path" data-value="' + escapeHtml(String(log.path)) + '">' + escapeHtml(decodedUrl) + '</a></td>';
+                        html += '<td><a href="#" class="logs-filter-link" data-filter="path" data-value="' + escapeHtml(String(log.path)) + '">' + escapeHtml(decodedUrl) + '</a></td>';
                         html += '<td><a data-action="ua" href="#" title="' + escapeHtml(String(log.ua)) + '">' + escapeHtml(String(log.display_name)) + '</a></td>';
                         html += '<td><a data-action="ip" data-ip="' + escapeHtml(String(ip)) + '" href="#">' + escapeHtml(String(ip)) + '</a>';
                         if (state.filter !== 'ip') {
-                            html += ' <a href="javascript:;" class="logs-filter-link" data-filter="ip" data-value="' + escapeHtml(String(ip)) + '">[ ? ]</a>';
+                            html += ' <a href="#" class="logs-filter-link" data-filter="ip" data-value="' + escapeHtml(String(ip)) + '">[ ? ]</a>';
                         }
                         html += '</td>';
                         html += '<td><a target="_blank" href="' + escapeHtml(String(log.referer)) + '">' + escapeHtml(String(log.referer)) + '</a></td>';
@@ -471,7 +471,7 @@ include 'table-js.php';
     $(document).ready(function() {
 
         // Tab 点击
-        $('#access-tabs li[data-tab]').on('click', function() { switchTab($(this).data('tab')); });
+        $('#access-tabs li[data-tab]').on('click', function(e) { e.preventDefault(); switchTab($(this).data('tab')); });
 
         // 初始加载
         if (initAction === 'overview') { loadOverview(); } else { loadLogs(logsState); }
@@ -501,7 +501,8 @@ include 'table-js.php';
         });
 
         // 取消筛选
-        $('#logs-clear-filter').on('click', function() {
+        $('#logs-clear-filter').on('click', function(e) {
+            e.preventDefault();
             loadLogs({ page: 1, type: logsState.type, filter: 'all', ip: '', cid: '', path: '' });
         });
 
