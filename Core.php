@@ -243,23 +243,21 @@ class Core
 
     /**
      * 写入 Redis 缓存
+     * TTL 统一为距明天 0 点的剩余秒数（86400 - 当天已过去的秒数）
      *
      * @access protected
      * @param string $key 缓存键名
      * @param array $data 缓存数据
-     * @param int|null $ttl 自定义 TTL（秒），为 null 时使用插件配置的默认值
      * @return void
      */
-    protected function setCache(string $key, array $data, ?int $ttl = null): void
+    protected function setCache(string $key, array $data): void
     {
         if ($this->redis === null) {
             return;
         }
 
         try {
-            if ($ttl === null) {
-                $ttl = (int)($this->config->redisKeyTTL ?: 86400);
-            }
+            $ttl = 86400 - (time() - strtotime(date("Y-m-d 00:00:00")));
             $this->redis->setex(
                 self::CACHE_PREFIX . $key,
                 max($ttl, 1),
@@ -339,7 +337,7 @@ class Core
         // ── 今日数据：始终实时查询，保证准确性 ──
         $this->overview['today'] = $this->queryDayOverview(date("Y-m-d"));
 
-        // ── 昨日数据：TTL 设为距明天 0 点的剩余秒数，跨天自动过期 ──
+        // ── 昨日数据：缓存键包含日期，跨天自动失效 ──
         $yesterdayDate = date("Y-m-d", strtotime('-1 day'));
         $yesterdayCacheKey = 'overview:yesterday:' . $yesterdayDate;
         $cached = $this->getCache($yesterdayCacheKey);
@@ -347,9 +345,7 @@ class Core
             $this->overview['yesterday'] = $cached;
         } else {
             $this->overview['yesterday'] = $this->queryDayOverview($yesterdayDate);
-            // 24h * 3600s - 当天已过去的秒数 = 距明天 0 点的剩余秒数
-            $yesterdayTtl = 86400 - (time() - strtotime(date("Y-m-d 00:00:00")));
-            $this->setCache($yesterdayCacheKey, $this->overview['yesterday'], $yesterdayTtl);
+            $this->setCache($yesterdayCacheKey, $this->overview['yesterday']);
         }
 
         // ── 当月数据：按 TTL 缓存 ──

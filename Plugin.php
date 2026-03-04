@@ -129,10 +129,6 @@ class Plugin implements PluginInterface
             'redisAuth', null, '',
             'Redis 认证', 'Redis 服务密码，默认留空无密码'
         );
-        $redisKeyTTL = new Text(
-            'redisKeyTTL', null, '86400',
-            '缓存时间（秒）', '来源统计数据的缓存过期时间，默认 86400 秒（一天），过期后自动从数据库刷新'
-        );
         $form->addInput($pageSize);
         $form->addInput($isDrop);
         $form->addInput($writeType);
@@ -141,7 +137,6 @@ class Plugin implements PluginInterface
         $form->addInput($redisHost);
         $form->addInput($redisPort->addRule('isInteger', _t('端口必须为纯数字')));
         $form->addInput($redisAuth);
-        $form->addInput($redisKeyTTL);
     }
 
     /**
