@@ -121,6 +121,28 @@ class Action extends Widget implements ActionInterface
         $this->response->throwJson($response);
     }
 
+    /**
+     * 概览页懒加载数据接口
+     */
+    public function overview()
+    {
+        try {
+            $this->checkAuth();
+            $data = $this->getAccess()->getOverviewData();
+            $response = [
+                'code' => 0,
+                'data' => $data,
+            ];
+        } catch (\Exception $e) {
+            $response = [
+                'code' => 500,
+                'data' => $e->getMessage(),
+            ];
+        }
+
+        $this->response->throwJson($response);
+    }
+
     protected function checkAuth()
     {
         if (!$this->getAccess()->isAdmin()) {

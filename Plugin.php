@@ -50,6 +50,7 @@ class Plugin implements PluginInterface
         Helper::addRoute('access_track_gif', '/access/log/track.gif', '\TypechoPlugin\Access\Action', 'writeLogs');
         Helper::addRoute('access_ip', '/access/ip.json', '\TypechoPlugin\Access\Action', 'ip');
         Helper::addRoute('access_delete_logs', '/access/log/delete.json', '\TypechoPlugin\Access\Action', 'deleteLogs');
+        Helper::addRoute('access_overview', '/access/overview.json', '\TypechoPlugin\Access\Action', 'overview');
         TypechoPlugin::factory('\Widget\Archive')->beforeRender = [__CLASS__, 'backend'];
         TypechoPlugin::factory('\Widget\Archive')->footer = [__CLASS__, 'frontend'];
         TypechoPlugin::factory('admin/footer.php')->end = [__CLASS__, 'adminFooter'];
@@ -66,7 +67,7 @@ class Plugin implements PluginInterface
     public static function deactivate(): string
     {
         $cleanFlag = false;
-        $config = Options::alloc()->plugin('Access');
+        $config = Options::alloc()->plugin(basename(__DIR__));
 
         // 如果 Redis 缓存为启用状态，删除所有缓存键
         if (isset($config->redisCache) && $config->redisCache == '1' && extension_loaded('redis')) {
@@ -82,6 +83,7 @@ class Plugin implements PluginInterface
         Helper::removeRoute('access_track_gif');
         Helper::removeRoute('access_ip');
         Helper::removeRoute('access_delete_logs');
+        Helper::removeRoute('access_overview');
 
         return _t($cleanFlag ? '插件已禁用，数据表已清除' : '插件已禁用，数据表已保留');
     }
