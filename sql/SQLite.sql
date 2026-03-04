@@ -20,17 +20,17 @@ CREATE TABLE `typecho_access` (
   `robot_id`          varchar(32)      default ''  ,
   `robot_version`     varchar(32)      default ''
 );
-CREATE INDEX `typecho_access_log_time`              ON `typecho_access_log` (`time`             );
-CREATE INDEX `typecho_access_log_path`              ON `typecho_access_log` (`path`             );
-CREATE INDEX `typecho_access_log_ip_ua`             ON `typecho_access_log` (`ip`, `ua`         );
-CREATE INDEX `typecho_access_log_robot`             ON `typecho_access_log` (`robot`, `time`    );
-CREATE INDEX `typecho_access_log_os_id`             ON `typecho_access_log` (`os_id`            );
-CREATE INDEX `typecho_access_log_robot_id`          ON `typecho_access_log` (`robot_id`         );
-CREATE INDEX `typecho_access_log_browser_id`        ON `typecho_access_log` (`browser_id`       );
-CREATE INDEX `typecho_access_log_content_id`        ON `typecho_access_log` (`content_id`       );
-CREATE INDEX `typecho_access_log_meta_id`           ON `typecho_access_log` (`meta_id`          );
-CREATE INDEX `typecho_access_log_entrypoint`        ON `typecho_access_log` (`entrypoint`       );
-CREATE INDEX `typecho_access_log_entrypoint_domain` ON `typecho_access_log` (`entrypoint_domain`);
-CREATE INDEX `typecho_access_log_referer`           ON `typecho_access_log` (`referer`          );
-CREATE INDEX `typecho_access_log_referer_domain`    ON `typecho_access_log` (`referer_domain`   );
+CREATE INDEX `typecho_access_time`              ON `typecho_access` (`time`             );
+CREATE INDEX `typecho_access_path`              ON `typecho_access` (`path`             );
+CREATE INDEX `typecho_access_ip_ua`             ON `typecho_access` (`ip`, `ua`         );
+CREATE INDEX `typecho_access_robot`             ON `typecho_access` (`robot`, `time`    );
+CREATE INDEX `typecho_access_os_id`             ON `typecho_access` (`os_id`            );
+CREATE INDEX `typecho_access_robot_id`          ON `typecho_access` (`robot_id`         );
+CREATE INDEX `typecho_access_browser_id`        ON `typecho_access` (`browser_id`       );
+CREATE INDEX `typecho_access_content_id`        ON `typecho_access` (`content_id`       );
+CREATE INDEX `typecho_access_meta_id`           ON `typecho_access` (`meta_id`          );
+CREATE INDEX `typecho_access_entrypoint`        ON `typecho_access` (`entrypoint`       );
+CREATE INDEX `typecho_access_entrypoint_domain` ON `typecho_access` (`entrypoint_domain`);
+CREATE INDEX `typecho_access_referer`           ON `typecho_access` (`referer`          );
+CREATE INDEX `typecho_access_referer_domain`    ON `typecho_access` (`referer_domain`   );
 COMMIT;
