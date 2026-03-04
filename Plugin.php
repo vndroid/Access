@@ -163,6 +163,14 @@ class Plugin implements PluginInterface
             'ipInfoToken', null, '',
             'IPinfo 接口令牌', 'IP 归属地查询接口令牌，请前往 <a href="https://ipinfo.io" target="_blank">ipinfo.io</a> 获取'
         );
+        $socks5Host = new Text(
+            'socks5Host', null, '',
+            'SOCKS5 代理地址', '格式为[主机:端口]，留空则不使用代理'
+        );
+        $socks5Auth = new Text(
+            'socks5Auth', null, '',
+            'SOCKS5 代理认证', '格式为 [用户名:密码]，留空则不使用认证'
+        );
         $redisCache = new Radio(
             'redisCache', [
                 '0' => '禁用',
@@ -187,6 +195,8 @@ class Plugin implements PluginInterface
         $form->addInput($writeType);
         $form->addInput($isOversea);
         $form->addInput($ipInfoToken);
+        $form->addInput($socks5Host);
+        $form->addInput($socks5Auth);
         $form->addInput($redisCache);
         $form->addInput($redisHost);
         $form->addInput($redisPort->addRule('isInteger', _t('端口必须为纯数字')));
