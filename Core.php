@@ -116,13 +116,24 @@ class Core
         }
         $list = $this->db->fetchAll($query);
         foreach ($list as &$row) {
-            $ua = new UA($row['ua']);
-            if ($ua->isRobot()) {
-                $name = $ua->getRobotID();
-                $version = $ua->getRobotVersion();
+            // 优先使用已存储的 browser_id/robot_id，避免重复解析 UA
+            if (!empty($row['robot']) && $row['robot'] == 1) {
+                $name = $row['robot_id'] ?? '';
+                $version = $row['robot_version'] ?? '';
             } else {
-                $name = $ua->getBrowserName();
-                $version = $ua->getBrowserVersion();
+                $name = $row['browser_id'] ?? '';
+                $version = $row['browser_version'] ?? '';
+            }
+            // 仅在存储字段为空时才回退到 UA 解析
+            if ($name === '' && !empty($row['ua'])) {
+                $ua = new UA($row['ua']);
+                if ($ua->isRobot()) {
+                    $name = $ua->getRobotID();
+                    $version = $ua->getRobotVersion();
+                } else {
+                    $name = $ua->getBrowserName();
+                    $version = $ua->getBrowserVersion();
+                }
             }
             if ($name == '') {
                 $row['display_name'] = _t('Unknown');
