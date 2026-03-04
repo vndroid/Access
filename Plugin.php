@@ -33,12 +33,13 @@ class Plugin implements PluginInterface
      * 激活插件方法,如果激活失败,直接抛出异常
      *
      * @return string
+     * @throws DbException
      * @throws PluginException
      */
     public static function activate(): string
     {
         if (!extension_loaded('curl')) {
-            throw new PluginException('需要 PHP 包含 cURL 扩展');
+            throw new PluginException('需要 PHP 环境支持 cURL 扩展');
         }
         $msg = self::install();
         Helper::addPanel(1, self::$panel, _t('访问统计'), _t('统计控制台'), 'subscriber');
@@ -81,17 +82,17 @@ class Plugin implements PluginInterface
      * @param Form $form 配置面板
      * @return void
      */
-    public static function config(Form $form)
+    public static function config(Form $form): void
     {
         $pageSize = new Text(
-            'pageSize', null, '10',
+            'pageSize', null, '20',
             '分页数量', '每页显示的日志数量'
         );
         $isDrop = new Radio(
             'isDrop', [
                 '0' => '否',
                 '1' => '是',
-            ], '0', '彻底卸载', '在禁用插件时，是否同时删除（不可恢复，谨慎选择）历史数据。'
+            ], '0', '数据清理', '在禁用插件时，同时删除数据库中历史数据（无法恢复）谨慎修改。'
         );
         $writeType = new Radio(
             'writeType', [
@@ -101,9 +102,9 @@ class Plugin implements PluginInterface
         );
         $isOversea = new Radio(
             'isOversea', [
-                '0' => '国内',
-                '1' => '海外',
-            ], '1', '部署地点', 'IP 归属地判断使用了多种接口，国内接口在海外机器上部署无法使用，请根据情况进行选择'
+                '0' => '中国大陆',
+                '1' => '其他国家或地区',
+            ], '1', '部署地点', '访客 IP 归属地判断接口种类，中国大陆接口在海外机器可能无法使用，请根据实际情况进行选择'
         );
         $form->addInput($pageSize);
         $form->addInput($isDrop);
@@ -125,17 +126,19 @@ class Plugin implements PluginInterface
      * 初始化以及升级插件数据库，如初始化失败,直接抛出异常
      *
      * @return string
+     * @throws DbException
      * @throws PluginException
      */
     public static function install(): string
     {
-        if (substr(trim(__DIR__, '/'), -6) !== 'Access') {
-            throw new PluginException(_t('插件目录名必须为 Access'));
+        if (!str_ends_with(trim(__DIR__, '/\\'), 'Access')) {
+            throw new PluginException(_t('插件目录名必须为 Access，且首字母大写，请检查插件目录名是否正确'));
         }
         $db = Db::get();
         $adapterName = $db->getAdapterName();
+        $msg = '';
 
-        if (strpos($adapterName, 'Mysql') !== false) {
+        if (str_contains($adapterName, 'Mysql')) {
             $prefix = $db->getPrefix();
             $scripts = file_get_contents(__TYPECHO_ROOT_DIR__ . __TYPECHO_PLUGIN_DIR__ . '/Access/sql/MySQL.sql');
             $scripts = str_replace('typecho_', $prefix, $scripts);
@@ -189,12 +192,12 @@ class Plugin implements PluginInterface
                     $msg = _t('数据表已存在，插件启用成功，') . $configLink;
                 }
                 return $msg;
-            } catch (Db\Exception $e) {
+            } catch (DbException $e) {
                 throw new PluginException(_t('数据表建立失败，插件启用失败，错误信息：%s。', $e->getMessage()));
             } catch (\Exception $e) {
                 throw new PluginException($e->getMessage());
             }
-        } elseif (strpos($adapterName, 'SQLite') !== false) {
+        } elseif (str_contains($adapterName, 'SQLite')) {
             $prefix = $db->getPrefix();
             $scripts = file_get_contents(__TYPECHO_ROOT_DIR__ . __TYPECHO_PLUGIN_DIR__ . '/Access/sql/SQLite.sql');
             $scripts = str_replace('typecho_', $prefix, $scripts);
@@ -214,13 +217,13 @@ class Plugin implements PluginInterface
                     $msg = _t('数据表已经存在，插件启用成功，') . $configLink;
                 }
                 return $msg;
-            } catch (Db\Exception $e) {
+            } catch (DbException $e) {
                 throw new PluginException(_t('数据表建立失败，插件启用失败，错误信息：%s。', $e->getMessage()));
             } catch (\Exception $e) {
                 throw new PluginException($e->getMessage());
             }
         } else {
-            throw new PluginException(_t('你的适配器为%s，目前只支持 MySQL 和 SQLite', $adapterName));
+            throw new PluginException(_t('当前适配器为%s，目前只支持 MySQL 和 SQLite', $adapterName));
         }
     }
 
@@ -229,8 +232,9 @@ class Plugin implements PluginInterface
      *
      * @param $archive
      * @return void
+     * @throws PluginException
      */
-    public static function backend($archive)
+    public static function backend($archive): void
     {
         $config = Options::alloc()->plugin('Access');
 
@@ -241,12 +245,13 @@ class Plugin implements PluginInterface
     }
 
     /**
-     * 获取前端统计，该方法要求客户端必须渲染网页，所以不能统计RSS等直接抓取PHP页面的方式
+     * 获取前端统计，该方法要求客户端必须渲染网页，所以不能统计 RSS 等直接抓取页面的方式
      *
      * @param $archive
      * @return void
+     * @throws PluginException
      */
-    public static function frontend($archive)
+    public static function frontend($archive): void
     {
         $config = Options::alloc()->plugin('Access');
         if ($config->writeType == 0) {
@@ -262,7 +267,7 @@ class Plugin implements PluginInterface
      *
      * @return void
      */
-    public static function adminFooter()
+    public static function adminFooter(): void
     {
         $url = $_SERVER['PHP_SELF'];
         $filename = substr($url, strrpos($url, '/') + 1);
