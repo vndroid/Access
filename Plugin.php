@@ -7,12 +7,15 @@ use Typecho\Db\Exception as DbException;
 use Typecho\Plugin as TypechoPlugin;
 use Typecho\Plugin\Exception as PluginException;
 use Typecho\Plugin\PluginInterface;
+use Typecho\Request;
+use Typecho\Response;
 use Typecho\Widget\Helper\Form;
 use Typecho\Widget\Helper\Form\Element\Text;
 use Typecho\Widget\Helper\Form\Element\Radio;
 use Utils\Helper;
 use Widget\Notice;
 use Widget\Options;
+use Widget\Plugins\Edit;
 
 if (!defined('__TYPECHO_ROOT_DIR__')) {
     exit;
@@ -107,36 +110,36 @@ class Plugin implements PluginInterface
                 '1' => '其他国家或地区',
             ], '1', '部署地点', '访客 IP 归属地判断接口种类，中国大陆接口在海外机器可能无法使用，请根据实际情况进行选择'
         );
-        $enableRedis = new Radio(
-            'enableRedis', [
+        $redisCache = new Radio(
+            'redisCache', [
                 '0' => '禁用',
                 '1' => '启用',
-            ], '0', 'Redis 缓存',
-            '启用后将缓存来源统计等慢查询结果到 Redis，需要 PHP redis 扩展'
+            ], '0', '缓存加速',
+            '启用后来源统计等慢查询结果会缓存至 Redis，提高访问速度'
         );
         $redisHost = new Text(
             'redisHost', null, '127.0.0.1',
-            'Redis 地址', 'Redis 服务器地址'
+            'Redis 地址', 'Redis 服务地址'
         );
         $redisPort = new Text(
             'redisPort', null, '6379',
-            'Redis 端口', 'Redis 服务器端口'
+            'Redis 端口', 'Redis 服务端口'
         );
         $redisPassword = new Text(
             'redisPassword', null, '',
             'Redis 密码', 'Redis 认证密码，无密码则留空'
         );
         $redisTtl = new Text(
-            'redisTtl', null, '300',
-            '缓存时间（秒）', '来源统计数据的缓存过期时间，默认 300 秒（5 分钟），过期后自动从数据库刷新'
+            'redisTtl', null, '86400',
+            '缓存时间（秒）', '来源统计数据的缓存过期时间，默认 86400 秒（一天），过期后自动从数据库刷新'
         );
         $form->addInput($pageSize);
         $form->addInput($isDrop);
         $form->addInput($writeType);
         $form->addInput($isOversea);
-        $form->addInput($enableRedis);
+        $form->addInput($redisCache);
         $form->addInput($redisHost);
-        $form->addInput($redisPort);
+        $form->addInput($redisPort->addRule('isInteger', _t('端口必须为纯数字')));
         $form->addInput($redisPassword);
         $form->addInput($redisTtl);
     }
@@ -157,22 +160,22 @@ class Plugin implements PluginInterface
      * @param array $settings 配置值
      * @param bool $isInit 是否为初始化
      * @return void
-     * @throws PluginException
+     * @throws DbException
      */
     public static function configHandle(array $settings, bool $isInit): void
     {
-        if (!$isInit && isset($settings['enableRedis']) && $settings['enableRedis'] == '1') {
+        if (!$isInit && isset($settings['redisCache']) && $settings['redisCache'] == '1') {
             if (!extension_loaded('redis')) {
                 Notice::alloc()->set(_t('启用 Redis 缓存失败：PHP 未安装 redis 扩展，请先安装扩展后再启用'), 'error');
-                $referer = \Typecho\Request::getInstance()->getReferer();
-                \Typecho\Response::getInstance()
+                $referer = Request::getInstance()->getReferer();
+                Response::getInstance()
                     ->setStatus(302)
                     ->setHeader('Location', $referer ?: '/')
                     ->respond();
             }
         }
 
-        \Widget\Plugins\Edit::configPlugin('Access', $settings);
+        Edit::configPlugin('Access', $settings);
     }
 
     /**

@@ -191,7 +191,7 @@ class Core
             return;
         }
 
-        if (!isset($this->config->enableRedis) || $this->config->enableRedis != '1') {
+        if (!isset($this->config->redisCache) || $this->config->redisCache != '1') {
             return;
         }
 
