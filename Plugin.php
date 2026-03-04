@@ -67,6 +67,12 @@ class Plugin implements PluginInterface
     {
         $cleanFlag = false;
         $config = Options::alloc()->plugin('Access');
+
+        // 如果 Redis 缓存为启用状态，删除所有缓存键
+        if (isset($config->redisCache) && $config->redisCache == '1' && extension_loaded('redis')) {
+            self::clearRedisCache($config);
+        }
+
         if ($config->isDrop == 1) {
             $db = Db::get();
             $db->query("DROP TABLE `{$db->getPrefix()}access`", Db::WRITE);
@@ -78,6 +84,45 @@ class Plugin implements PluginInterface
         Helper::removeRoute('access_delete_logs');
 
         return _t($cleanFlag ? '插件已禁用，数据表已清除' : '插件已禁用，数据表已保留');
+    }
+
+    /**
+     * 清除 Redis 中所有 Access 插件的缓存键
+     *
+     * @param mixed $config 插件配置
+     * @return void
+     */
+    private static function clearRedisCache($config): void
+    {
+        try {
+            $redis = new \Redis();
+            $host = $config->redisHost ?: '127.0.0.1';
+            $port = (int)($config->redisPort ?: 6379);
+
+            if (!$redis->connect($host, $port, 3)) {
+                return;
+            }
+
+            $password = $config->redisAuth ?? '';
+            if ($password !== '') {
+                $redis->auth($password);
+            }
+
+            $redis->ping();
+
+            // 使用 SCAN 迭代删除所有匹配前缀的键，避免 KEYS 阻塞
+            $prefix = 'typecho_access:*';
+            $iterator = null;
+            while (($keys = $redis->scan($iterator, $prefix, 100)) !== false) {
+                if (!empty($keys)) {
+                    $redis->del($keys);
+                }
+            }
+
+            $redis->close();
+        } catch (\Exception $e) {
+            // 清除失败不影响禁用流程
+        }
     }
 
     /**
