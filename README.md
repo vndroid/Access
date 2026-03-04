@@ -35,6 +35,7 @@ Current Lauguage: **English** | [Simplified Chinese](/README_CN.md)
 * When the plugin update, please disable the plugin before updating.
 * The plugin directory name must be 'Access'.
 * Need PHP Calendar ext.
+* Need PHP cURL ext.
 
 ### Features
 
@@ -42,7 +43,6 @@ Current Lauguage: **English** | [Simplified Chinese](/README_CN.md)
 - Ignore the administrator login log.
 - Support the referer and domain show and sort.
 - Add remove all logs when the plugin is disabled feature.
-- Use [ipip.net](https://ipip.net/) DataX Offline Database.
 - Support Frontend or Backend write log.
 - Log filter supports filtering by ip, article title, and route
 
