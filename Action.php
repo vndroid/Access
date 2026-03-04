@@ -42,9 +42,9 @@ class Action extends Widget implements ActionInterface
 
     public function ipAnalyze(): void
     {
+        $this->checkAuth();
         $ip = $this->request->get('ip');
         try {
-            $this->checkAuth();
             $response = Ip::find($ip);
             if ($response['status'] === "success") {
                 $response = [
@@ -101,8 +101,8 @@ class Action extends Widget implements ActionInterface
 
     public function deleteLogs(): void
     {
+        $this->checkAuth();
         try {
-            $this->checkAuth();
             $data = @file_get_contents('php://input');
             $data = json_decode($data, true);
             if (!is_array($data)) {
@@ -127,8 +127,8 @@ class Action extends Widget implements ActionInterface
      */
     public function overview(): void
     {
+        $this->checkAuth();
         try {
-            $this->checkAuth();
             $data = $this->getAccess()->getOverviewData();
             $response = [
                 'code' => 0,
@@ -149,8 +149,8 @@ class Action extends Widget implements ActionInterface
      */
     public function logsParse(): void
     {
+        $this->checkAuth();
         try {
-            $this->checkAuth();
             $page   = (int)$this->request->get('page', 1);
             $type   = (int)$this->request->get('type', 1);
             $filter = $this->request->get('filter', 'all');
@@ -175,10 +175,17 @@ class Action extends Widget implements ActionInterface
         $this->response->throwJson($response);
     }
 
+    /**
+     * 鉴权：非管理员直接返回 403 并终止
+     */
     protected function checkAuth(): void
     {
         if (!$this->getAccess()->isAdmin()) {
-            throw new RuntimeException('Access Denied');
+            $this->response->setStatus(403);
+            $this->response->throwJson([
+                'code' => 403,
+                'data' => 'Access Denied',
+            ]);
         }
     }
 
