@@ -1,45 +1,57 @@
 <?php
-if (!defined('__ACCESS_PLUGIN_ROOT__')) {
-    throw new RuntimeException('Bootstrap File Not Found');
+
+namespace TypechoPlugin\Access;
+
+use Typecho\Cookie;
+use Typecho\Db;
+use Typecho\I18n;
+use Typecho\Plugin\Exception as PluginException;
+use Typecho\Request;
+use Typecho\Response;
+use Utils\Helper;
+use Widget\Options;
+use Widget\User;
+
+if (!defined('__TYPECHO_ROOT_DIR__')) {
+    exit;
 }
 
-class Access_Core
+class Core
 {
-    protected $db;
-    protected $request;
-    protected $response;
+    protected Db $db;
+    protected Request $request;
+    protected Response $response;
 
-    public $ua;
+    public UA $ua;
     public $config;
-    public $action;
-    public $title;
-    public $logs = array();
-    public $overview = array();
-    public $referer = array();
+    public string $action;
+    public string $title;
+    public array $logs = [];
+    public array $overview = [];
+    public array $referer = [];
 
     /**
      * 构造函数，根据不同类型的请求，计算不同的数据并渲染输出
      *
      * @access public
-     * @return void
      */
     public function __construct()
     {
         # Load language pack
-        if (Typecho_I18n::getLang() !== 'zh_CN') {
+        if (I18n::getLang() !== 'zh_CN') {
             $file = __TYPECHO_ROOT_DIR__ . __TYPECHO_PLUGIN_DIR__ .
-            '/Access/lang/' . Typecho_I18n::getLang() . '.mo';
-            file_exists($file) && Typecho_I18n::addLang($file);
+            '/Access/lang/' . I18n::getLang() . '.mo';
+            file_exists($file) && I18n::addLang($file);
         }
         # Init variables
-        $this->db = Typecho_Db::get();
-        $this->config = Typecho_Widget::widget('Widget_Options')->plugin('Access');
-        $this->request = Typecho_Request::getInstance();
-        $this->response = Typecho_Response::getInstance();
+        $this->db = Db::get();
+        $this->config = Options::alloc()->plugin('Access');
+        $this->request = Request::getInstance();
+        $this->response = Response::getInstance();
         if ($this->config->pageSize == null || $this->config->isDrop == null) {
-            throw new Typecho_Plugin_Exception(_t('请先设置插件！'));
+            throw new PluginException(_t('请先设置插件！'));
         }
-        $this->ua = new Access_UA($this->request->getAgent());
+        $this->ua = new UA($this->request->getAgent());
         switch ($this->request->get('action')) {
             case 'overview':
                 $this->action = 'overview';
@@ -59,7 +71,7 @@ class Access_Core
     /**
      * 生成详细访问日志数据，提供给页面渲染使用
      *
-     * @access public
+     * @access protected
      * @return void
      */
     protected function parseLogs()
@@ -69,7 +81,7 @@ class Access_Core
         $pagenum = $this->request->get('page', 1);
         $offset = (max((int)$pagenum, 1) - 1) * $this->config->pageSize;
         $query = $this->db->select()->from('table.access')
-            ->order('time', Typecho_Db::SORT_DESC)
+            ->order('time', Db::SORT_DESC)
             ->offset($offset)->limit($this->config->pageSize);
         $qcount = $this->db->select('count(1) AS count')->from('table.access');
         switch ($type) {
@@ -104,7 +116,7 @@ class Access_Core
         }
         $list = $this->db->fetchAll($query);
         foreach ($list as &$row) {
-            $ua = new Access_UA($row['ua']);
+            $ua = new UA($row['ua']);
             if ($ua->isRobot()) {
                 $name = $ua->getRobotID();
                 $version = $ua->getRobotVersion();
@@ -126,16 +138,16 @@ class Access_Core
 
         $filter = $this->request->get('filter', 'all');
         $filterOptions = $this->request->get($filter);
-        $filterArr = array(
+        $filterArr = [
             'filter' => $filter,
             $filter => $filterOptions
-        );
+        ];
 
-        $page = new Access_Page($this->config->pageSize, $this->logs['rows'], $pagenum, 10, array_merge($filterArr, array(
-            'panel' => Access_Plugin::$panel,
+        $page = new Page($this->config->pageSize, $this->logs['rows'], $pagenum, 10, array_merge($filterArr, [
+            'panel' => Plugin::$panel,
             'action' => 'logs',
             'type' => $type,
-        )));
+        ]));
         $this->logs['page'] = $page->show();
 
         $this->logs['cidList'] = $this->db->fetchAll($this->db->select('DISTINCT content_id as cid, COUNT(1) as count, table.contents.title as title')
@@ -145,23 +157,23 @@ class Access_Core
                 ->where('table.contents.type = ?', 'post')
                 ->group('table.access.content_id')
                 ->group('table.contents.title')
-                ->order('count', Typecho_Db::SORT_DESC));
+                ->order('count', Db::SORT_DESC));
     }
 
     /**
      * 生成来源统计数据，提供给页面渲染使用
      *
-     * @access public
+     * @access protected
      * @return void
      */
     protected function parseReferer()
     {
         $this->referer['url'] = $this->db->fetchAll($this->db->select('DISTINCT entrypoint AS value, COUNT(1) as count')
                 ->from('table.access')->where("entrypoint <> ''")->group('entrypoint')
-                ->order('count', Typecho_Db::SORT_DESC)->limit($this->config->pageSize));
+                ->order('count', Db::SORT_DESC)->limit($this->config->pageSize));
         $this->referer['domain'] = $this->db->fetchAll($this->db->select('DISTINCT entrypoint_domain AS value, COUNT(1) as count')
                 ->from('table.access')->where("entrypoint_domain <> ''")->group('entrypoint_domain')
-                ->order('count', Typecho_Db::SORT_DESC)->limit($this->config->pageSize));
+                ->order('count', Db::SORT_DESC)->limit($this->config->pageSize));
         $this->referer = $this->htmlEncode($this->urlDecode($this->referer));
     }
 
@@ -174,12 +186,12 @@ class Access_Core
     protected function makeChartJson(): string
     {
         $chart = [];
-        foreach($this->overview as $type => $val) {
+        foreach ($this->overview as $type => $val) {
             $val['sub_title'] = 'Generate By AccessPlugin';
-            if($type == 'today' || $type == 'yesterday') {
+            if ($type == 'today' || $type == 'yesterday') {
                 $val['xAxis'] = range(0, count($val['ip']['detail']));
                 $val['title'] = _t('%s 统计', $val['time']);
-            } elseif($type == 'month') {
+            } elseif ($type == 'month') {
                 $val['xAxis'] = range(1, count($val['ip']['detail']));
                 $val['title'] = _t('%s 月统计', $val['time']);
             }
@@ -198,19 +210,18 @@ class Access_Core
     {
         $types = ['today', 'yesterday', 'month'];
         # 分类分时段统计数据
-        foreach($types as $type) {
-            if($type == 'today' || $type == 'yesterday') {
-                if($type == 'today')
+        foreach ($types as $type) {
+            if ($type == 'today' || $type == 'yesterday') {
+                if ($type == 'today')
                     $time = date("Y-m-d");
                 else
                     $time = date("Y-m-d", strtotime('-1 day'));
                 $this->overview[$type]['time'] = $time;
 
                 # 按小时统计数据
-                for($hour = 0; $hour < 24; $hour++) {
+                for ($hour = 0; $hour < 24; $hour++) {
                     $start = strtotime(date("{$time} {$hour}:00:00"));
                     $end = strtotime(date("{$time} {$hour}:59:59"));
-                    // "SELECT DISTINCT ip FROM {$this->table} {$where} AND `time` BETWEEN {$start} AND {$end}"));
                     $subQuery = $this->db->select('DISTINCT ip')->from('table.access')
                         ->where("time >= ? AND time <= ?", $start, $end);
                     if (method_exists($subQuery, 'prepare')) {
@@ -218,7 +229,6 @@ class Access_Core
                     }
                     $this->overview[$type]['ip']['detail'][$hour] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
                         ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
-                    // "SELECT DISTINCT ip,ua FROM {$this->table} {$where} AND `time` BETWEEN {$start} AND {$end}"));
                     $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')
                         ->where("time >= ? AND time <= ?", $start, $end);
                     if (method_exists($subQuery, 'prepare')) {
@@ -226,7 +236,6 @@ class Access_Core
                     }
                     $this->overview[$type]['uv']['detail'][$hour] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
                         ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
-                    // "SELECT ip FROM {$this->table} {$where} AND `time` BETWEEN {$start} AND {$end}"));
                     $this->overview[$type]['pv']['detail'][$hour] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
                         ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count'];
                 }
@@ -251,14 +260,14 @@ class Access_Core
                     ->from('table.access')
                     ->where("time >= ? AND time <= ?", $start, $end)
                 )[0]['count'];
-            } elseif($type == 'month') {
+            } elseif ($type == 'month') {
                 $year = date('Y');
                 $month = date("m");
-                $monthDays = cal_days_in_month(CAL_GREGORIAN, (int)$month, (int)$year); # 计算当月天数
+                $monthDays = cal_days_in_month(CAL_GREGORIAN, (int)$month, (int)$year);
                 $this->overview[$type]['time'] = $month;
 
                 # 按天统计数据
-                for($day = 1; $day <= $monthDays; $day++) {
+                for ($day = 1; $day <= $monthDays; $day++) {
                     $start = strtotime(date("{$year}-{$month}-{$day} 00:00:00"));
                     $end = strtotime(date("{$year}-{$month}-{$day} 23:59:59"));
 
@@ -278,19 +287,15 @@ class Access_Core
                         ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
                     $this->overview[$type]['pv']['detail'][$day-1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
                         ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count'];
-
                 }
             }
         }
 
         # 统计总计数据
-        // "SELECT DISTINCT ip FROM {$this->table} {$where}"));
         $this->overview['total']['ip'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
             ->from('(' . $this->db->select('DISTINCT ip')->from('table.access') . ') AS tmp'))[0]['count'];
-        // "SELECT DISTINCT ip,ua FROM {$this->table} {$where}"));
         $this->overview['total']['uv'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
             ->from('(' . $this->db->select('DISTINCT ip,ua')->from('table.access') . ') AS tmp'))[0]['count'];
-        // "SELECT ip FROM {$this->table} {$where}"));
         $this->overview['total']['pv'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
             ->from('table.access'))[0]['count'];
 
@@ -300,19 +305,16 @@ class Access_Core
 
     /**
      * 编码数组中的字符串为 HTML 实体
-     * 默认只有数组的值被编码，下标不被编码
-     * 如果数据类型是数组，那么它的所有子元素都将被递归编码
-     * 只有字符串类型才会被编码
-     * @param array $data 将要被编码的数据
-     * @param bool $valuesOnly 是否只编码数组数值，如果为 false 那么所有下标和值都将被编码
-     * @param string $charset 字符串编码方式，默认为 UTF-8
-     * @return array 编码后的数据
-     * @see http://www.php.net/manual/en/function.htmlspecialchars.php
+     *
+     * @param array|string $data 将要被编码的数据
+     * @param bool $valuesOnly 是否只编码数组数值
+     * @param string $charset 字符串编码方式
+     * @return array|string 编码后的数据
      */
     protected function htmlEncode($data, bool $valuesOnly = true, string $charset = 'UTF-8')
     {
         if (is_array($data)) {
-            $d = array();
+            $d = [];
             foreach ($data as $key => $value) {
                 if (!$valuesOnly) {
                     $key = $this->htmlEncode($key, $valuesOnly, $charset);
@@ -328,18 +330,15 @@ class Access_Core
 
     /**
      * 解析所有 URL 编码过的字符
-     * 默认只有数组的值被解码，下标不被解码
-     * 如果数据类型是数组，那么它的所有子元素都将被递归解码
-     * 只有字符串类型才会被解码
-     * @param array $data 将要被解码的数据
-     * @param bool $valuesOnly 是否只解码数组数值，如果为 false 那么所有下标和值都将被解码
-     * @return array 解码后的数据
-     * @see http://www.php.net/manual/en/function.urldecode.php
+     *
+     * @param array|string $data 将要被解码的数据
+     * @param bool $valuesOnly 是否只解码数组数值
+     * @return array|string 解码后的数据
      */
     protected function urlDecode($data, bool $valuesOnly = true)
     {
         if (is_array($data)) {
-            $d = array();
+            $d = [];
             foreach ($data as $key => $value) {
                 if (!$valuesOnly) {
                     $key = $this->urlDecode($key, $valuesOnly);
@@ -361,21 +360,21 @@ class Access_Core
      */
     public function isAdmin(): bool
     {
-        $hasLogin = Typecho_Widget::widget('Widget_User')->hasLogin();
+        $hasLogin = User::alloc()->hasLogin();
         if (!$hasLogin) {
             return false;
         }
-        $isAdmin = Typecho_Widget::widget('Widget_User')->pass('administrator', true);
-        return $isAdmin;
+        return User::alloc()->pass('administrator', true);
     }
 
     /**
      * 删除记录
      *
      * @access public
+     * @param array $ids
      * @return void
      */
-    public function deleteLogs($ids)
+    public function deleteLogs(array $ids)
     {
         foreach ($ids as $id) {
             $this->db->query($this->db->delete('table.access')
@@ -394,13 +393,13 @@ class Access_Core
     {
         $entrypoint = $this->request->getReferer();
         if ($entrypoint == null) {
-            $entrypoint = Typecho_Cookie::get('__typecho_access_entrypoint')?:'';
+            $entrypoint = Cookie::get('__typecho_access_entrypoint') ?: '';
         }
         if (parse_url($entrypoint, PHP_URL_HOST) == parse_url(Helper::options()->siteUrl, PHP_URL_HOST)) {
             $entrypoint = '';
         }
         if ($entrypoint != null) {
-            Typecho_Cookie::set('__typecho_access_entrypoint', $entrypoint);
+            Cookie::set('__typecho_access_entrypoint', $entrypoint);
         }
         return $entrypoint;
     }
@@ -408,17 +407,17 @@ class Access_Core
     /**
      * IPv6 地址转长字符串
      *
-     * @param $ipv6
+     * @param string $ipv6
      * @return string
      */
-    function ip62long($ipv6): string
+    public function ip62long(string $ipv6): string
     {
         $ip_n = inet_pton($ipv6);
-        $bits = 15; // 16 x 8 bit = 128bit
+        $bits = 15;
         $ipv6long = '';
         while ($bits >= 0) {
             $bin = sprintf("%08b", (ord($ip_n[$bits])));
-            $ipv6long = $bin.$ipv6long;
+            $ipv6long = $bin . $ipv6long;
             $bits--;
         }
         return gmp_strval(gmp_init($ipv6long, 2), 10);
@@ -427,26 +426,25 @@ class Access_Core
     /**
      * 长字符还原 IPv6
      *
-     * @param $ipv6long
+     * @param string $ipv6long
      * @return false|string
      */
-    function long2ip6($ipv6long)
+    public function long2ip6(string $ipv6long)
     {
         $bin = gmp_strval(gmp_init($ipv6long, 10), 2);
         if (strlen($bin) < 128) {
             $pad = 128 - strlen($bin);
             for ($i = 1; $i <= $pad; $i++) {
-                $bin = "0".$bin;
+                $bin = "0" . $bin;
             }
         }
+        $ipv6 = '';
         $bits = 0;
         while ($bits <= 7) {
-            $bin_part = substr($bin, ($bits*16), 16);
-            $ipv6 .= dechex(bindec($bin_part)).":";
+            $bin_part = substr($bin, ($bits * 16), 16);
+            $ipv6 .= dechex(bindec($bin_part)) . ":";
             $bits++;
         }
-        // compress
-
         return inet_ntop(inet_pton(substr($ipv6, 0, -1)));
     }
 
@@ -471,14 +469,13 @@ class Access_Core
         // 判断 IP 类型
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
             $ip = bindec(decbin(ip2long($ip)));
-
         } else if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
             $ip = $this->ip62long($ip);
         }
 
         $entrypoint = $this->getEntryPoint();
         $referer = $this->request->getReferer();
-        if (empty($referer)){
+        if (empty($referer)) {
             $referer = '';
         }
         $time = Helper::options()->gmtTime + (Helper::options()->timezone - Helper::options()->serverTimezone);
@@ -492,7 +489,7 @@ class Access_Core
             $meta_id = is_numeric($meta_id) ? $meta_id : null;
         }
 
-        $rows = array(
+        $rows = [
             'ua' => $this->ua->getUA(),
             'browser_id' => $this->ua->getBrowserID(),
             'browser_version' => $this->ua->getBrowserVersion(),
@@ -512,11 +509,12 @@ class Access_Core
             'robot' => $this->ua->isRobot() ? 1 : 0,
             'robot_id' => $this->ua->getRobotID(),
             'robot_version' => $this->ua->getRobotVersion(),
-        );
+        ];
 
         try {
             $this->db->query($this->db->insert('table.access')->rows($rows));
-        } catch (Exception $e) {} catch (Typecho_Db_Query_Exception $e) {}
+        } catch (\Exception $e) {
+        }
     }
 
     /**
@@ -524,14 +522,14 @@ class Access_Core
      *
      * @access public
      * @return void
-     * @throws Typecho_Plugin_Exception
+     * @throws PluginException
      */
     public static function rewriteLogs()
     {
-        $db = Typecho_Db::get();
+        $db = Db::get();
         $rows = $db->fetchAll($db->select()->from('table.access'));
         foreach ($rows as $row) {
-            $ua = new Access_UA($row['ua']);
+            $ua = new UA($row['ua']);
             $row['browser_id'] = $ua->getBrowserID();
             $row['browser_version'] = $ua->getBrowserVersion();
             $row['os_id'] = $ua->getOSID();
@@ -541,8 +539,8 @@ class Access_Core
             $row['robot_version'] = $ua->getRobotVersion();
             try {
                 $db->query($db->update('table.access')->rows($row)->where('id = ?', $row['id']));
-            } catch (Typecho_Db_Exception $e) {
-                throw new Typecho_Plugin_Exception(_t('刷新数据库失败：%s。', $e->getMessage()));
+            } catch (Db\Exception $e) {
+                throw new PluginException(_t('刷新数据库失败：%s。', $e->getMessage()));
             }
         }
     }
@@ -556,7 +554,6 @@ class Access_Core
      */
     public function parseArchive($archive): array
     {
-        // 暂定首页的meta_id为0
         $content_id = null;
         $meta_id = null;
         if ($archive->is('index')) {
@@ -571,29 +568,34 @@ class Access_Core
             if (is_array($archive->categories) && !empty($archive->categories)) {
                 $meta_id = $archive->categories[0]['mid'];
             }
-        } elseif ($archive->is('archive', 404)) {}
+        }
 
-        return array(
+        return [
             'content_id' => $content_id,
             'meta_id' => $meta_id,
-        );
+        ];
     }
-    
-    public function long2ip($long) {
-        // 判断是否为 IPv6 地址
+
+    /**
+     * 长整型转 IP 地址
+     *
+     * @param string $long
+     * @return false|string
+     */
+    public function long2ip($long)
+    {
         $len = trim(strlen($long));
-        if($len ==38){
+        if ($len == 38) {
             return $this->long2ip6($long);
         }
-        // 判断是否为无效 IPv4 地址
         if ($long < 0 || $long > 4294967295) return false;
         $ip = "";
-        for ($i=3;$i>=0;$i--) {
-            $ip .= (int)($long / pow(256,$i));
-            $long -= (int)($long / pow(256,$i))*pow(256,$i);
-            if ($i>0) $ip .= ".";
+        for ($i = 3; $i >= 0; $i--) {
+            $ip .= (int)($long / pow(256, $i));
+            $long -= (int)($long / pow(256, $i)) * pow(256, $i);
+            if ($i > 0) $ip .= ".";
         }
         return $ip;
     }
-
 }
+

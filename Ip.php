@@ -1,59 +1,59 @@
 <?php
-if (!defined('__ACCESS_PLUGIN_ROOT__')) {
-    throw new RuntimeException('Bootstrap File Not Found');
+
+namespace TypechoPlugin\Access;
+
+if (!defined('__TYPECHO_ROOT_DIR__')) {
+    exit;
 }
 
 /**
  * 地址解析类
- * Class Access_Ip
  */
-class Access_Ip
+class Ip
 {
-    private static $ip = NULL;
+    private static ?self $ip = null;
 
-    private static $fp = NULL;
+    private static $fp = null;
 
-    private static $cached = array();
+    private static array $cached = [];
 
-    public static function find($ip): array
+    public static function find(string $ip): array
     {
-        if (empty($ip) === TRUE) {
-            return array(
+        if (empty($ip)) {
+            return [
                 "status" => "failure",
                 "country" => null,
                 "city" => null,
-            );
+            ];
         }
 
         $nip = gethostbyname($ip);
         $ipdot = explode('.', $nip);
 
         if ($ipdot[0] < 0 || $ipdot[0] > 255 || count($ipdot) !== 4) {
-            return array(
+            return [
                 "status" => "failure",
                 "country" => null,
                 "city" => null,
-            );
+            ];
         }
 
-        if (isset(self::$cached[$nip]) === true) {
+        if (isset(self::$cached[$nip])) {
             return self::$cached[$nip];
         }
 
-        if (self::$fp === NULL) {
+        if (self::$fp === null) {
             self::init();
         }
 
         $url = 'http://ip-api.com/json/';
         $request = $url . $nip;
         $ch = curl_init();
-        #curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        #curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_URL, $request);
         curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4685.0 Safari/537.36');
         $result = json_decode(curl_exec($ch), true);
-        return array(
+        return [
             'status' => $result['status'],
             'country' => $result['country'],
             'countryCode' => $result['countryCode'],
@@ -63,24 +63,25 @@ class Access_Ip
             'zip' => $result['zip'],
             'timezone' => $result['timezone'],
             'query' => $result['query'],
-        );
+        ];
     }
 
     private static function init(): void
     {
-        if (self::$fp === NULL) {
+        if (self::$fp === null) {
             self::$ip = new self();
             if (!function_exists('curl_init')) {
-                throw new RuntimeException('当前主机不支持 cURL ，请检查环境！');
+                throw new \RuntimeException('当前主机不支持 cURL ，请检查环境！');
             }
         }
     }
 
     public function __destruct()
     {
-        if (self::$fp !== NULL) {
+        if (self::$fp !== null) {
             fclose(self::$fp);
-            self::$fp = NULL;
+            self::$fp = null;
         }
     }
 }
+

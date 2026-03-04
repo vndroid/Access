@@ -1,31 +1,136 @@
 <?php
+/**
+ * @var Options $options
+ * @var Request $request
+ * @var Security $security
+ * @var User $user
+ * @var Menu $menu
+ */
 include_once 'common.php';
 include 'header.php';
 include 'menu.php';
-require_once __DIR__ . '/../Access_Bootstrap.php';
-$access = new Access_Core();
+
+use Typecho\Request;
+use TypechoPlugin\Access\Core;
+use TypechoPlugin\Access\Plugin as AccessPlugin;
+use Utils\Helper;
+use Widget\Menu;
+use Widget\Options;
+use Widget\Security;
+use Widget\User;
+
+$access = new Core();
 ?>
-<link rel="stylesheet" href="<?php $options->pluginUrl('Access/css/style.css?v=2.4.0')?>">
+<link rel="stylesheet" href="<?php $options->pluginUrl('Access/css/style.css?v=3.0.0')?>">
 <link rel="stylesheet" href="<?php $options->pluginUrl('Access/sweetalert/sweetalert.css')?>">
-<div class="main">
+<main class="main">
     <div class="body container">
         <div class="typecho-page-title">
            <h2><?php echo $access->title;?></h2>
         </div>
         <div class="row typecho-page-main" role="main">
-             <div class="col-mb-12">
-                <ul class="typecho-option-tabs fix-tabs clearfix">
-                    <li <?=($access->action == 'overview' ? ' class="current"' : '')?>><a href="<?php $options->adminUrl('extending.php?panel=' . Access_Plugin::$panel . '&action=overview'); ?>"><?php _e('访问概览'); ?></a></li>
-                    <li <?=($access->action == 'logs' ? ' class="current"' : '')?>><a href="<?php $options->adminUrl('extending.php?panel=' . Access_Plugin::$panel . '&action=logs'); ?>"><?php _e('访问日志'); ?></a></li>
-                    <li><a href="<?php $options->adminUrl('options-plugin.php?config=Access') ?>"><?php _e('插件设置'); ?></a></li>
-                </ul>
-            </div>
-
-            <?php if($access->action == 'logs'):?>
-
             <div class="col-mb-12 typecho-list">
-                <div class="typecho-list-operate clearfix">
-
+                <div class="typecho-list-operate">
+                    <ul class="typecho-option-tabs">
+                        <li <?=($access->action == 'overview' ? ' class="current"' : '')?>><a href="<?php $options->adminUrl('extending.php?panel=' . AccessPlugin::$panel . '&action=overview'); ?>"><?php _e('访问概览'); ?></a></li>
+                        <li <?=($access->action == 'logs' ? ' class="current"' : '')?>><a href="<?php $options->adminUrl('extending.php?panel=' . AccessPlugin::$panel . '&action=logs'); ?>"><?php _e('访问日志'); ?></a></li>
+                        <li><a href="<?php $options->adminUrl('options-plugin.php?config=Access') ?>"><?php _e('插件设置'); ?></a></li>
+                    </ul>
+                </div>
+                <?php if($access->action == 'logs'):?>
+                <form class="typecho-list-operate search-form" method="get">
+                    <div class="operate">
+                        <label><i class="sr-only"><?php _e('全选'); ?></i><input class="typecho-table-select-all" type="checkbox" /></label>
+                        <div class="btn-group btn-drop">
+                            <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only"><?php _e('操作'); ?></i><?php _e('选中项'); ?> <i class="i-caret-down"></i></button>
+                            <ul class="dropdown-menu">
+                                <li><a data-action="delete" href="javascript:"><?php _e('删除'); ?></a></li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="search" role="search">
+                        <?php if ($request->get('filter', 'all') != 'all'): ?>
+                            <a href="<?php $options->adminUrl('extending.php?panel=' . AccessPlugin::$panel . '&action=logs'); ?>"><?php _e('&laquo; 取消筛选'); ?></a>
+                        <?php endif; ?>
+                        <input type="hidden" value="<?php echo $request->get('panel'); ?>" name="panel" />
+                        <?php if(isset($request->page)): ?>
+                            <input type="hidden" value="<?php echo $request->get('page'); ?>" name="page" />
+                        <?php endif; ?>
+                        <label>
+                            <select name="filter">
+                                <option <?php if($request->filter == 'all'): ?> selected="true" <?php endif; ?>value="all"><?php _e('全部条件'); ?></option>
+                                <option <?php if($request->filter == 'ip'): ?> selected="true" <?php endif; ?>value="ip"><?php _e('按IP'); ?></option>
+                                <option <?php if($request->filter == 'post'): ?> selected="true" <?php endif; ?>value="post"><?php _e('按文章'); ?></option>
+                                <option <?php if($request->filter == 'path'): ?> selected="true" <?php endif; ?>value="path"><?php _e('按路由'); ?></option>
+                            </select>
+                        </label>
+                        <label style="<?php if($request->get('filter', 'all') != 'ip'): ?>display: none<?php endif; ?>">
+                            <input type="text" class="text-s" placeholder="" value="<?php echo htmlspecialchars($request->ip); ?>" name="ip" />
+                        </label>
+                        <label style="<?php if($request->get('filter', 'all') != 'post'): ?>display: none<?php endif; ?>">
+                            <select name="cid">
+                                <?php foreach ($access->logs['cidList'] as $content):?>
+                                    <option <?php if($request->cid == $content['cid']): ?> selected="true" <?php endif; ?>value="<?php echo $content['cid'];?>"><?php echo $content['title'];?> (<?php echo $content['count'];?>)</option>
+                                <?php endforeach;?>
+                            </select>
+                        </label>
+                        <label style="<?php if($request->get('filter', 'all') != 'path'): ?>display: none<?php endif; ?>">
+                            <input type="text" class="text-s" placeholder="" value="<?php echo htmlspecialchars($request->path); ?>" name="path" />
+                        </label>
+                        <label>
+                            <select name="type">
+                                <option <?php if($request->type == 1): ?> selected="true" <?php endif; ?>value="1"><?php _e('默认（仅人类）'); ?></option>
+                                <option <?php if($request->type == 2): ?> selected="true" <?php endif; ?>value="2"><?php _e('筛选（仅爬虫）'); ?></option>
+                                <option <?php if($request->type == 3): ?> selected="true" <?php endif; ?>value="3"><?php _e('所有'); ?></option>
+                            </select>
+                        </label>
+                        <input type="hidden" name="page" value="1">
+                        <button type="button" class="btn btn-s"><?php _e('筛选'); ?></button>
+                    </div>
+                </form>
+                <form class="operate-form" method="post">
+                    <div class="typecho-table-wrap">
+                        <table class="typecho-list-table">
+                            <colgroup>
+                                <col width="5%"/>
+                                <col width="20%"/>
+                                <col width="25%"/>
+                                <col width="18%"/>
+                                <col width="20%"/>
+                                <col width="15%"/>
+                            </colgroup>
+                            <thead>
+                            <tr>
+                                <th>\</th>
+                                <th><?php _e('Path'); ?></th>
+                                <th><?php _e('UA'); ?></th>
+                                <th><?php _e('IP'); ?></th>
+                                <th><?php _e('Referrals'); ?></th>
+                                <th><?php _e('Date'); ?></th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <?php if(!empty($access->logs['list'])): ?>
+                                <?php foreach ($access->logs['list'] as $log): ?>
+                                    <tr id="<?php echo $log['id']; ?>" data-id="<?php echo $log['id']; ?>">
+                                        <td><label><input type="checkbox" data-id="<?php echo $log['id']; ?>" value="<?php echo $log['id']; ?>" name="id[]"/></label></td>
+                                        <td><a target="_self" href="<?php $options->adminUrl('extending.php?panel=' . AccessPlugin::$panel . '&filter=path&path=' . $log['path'] . '&type='. $request->type); ?>"><?php echo urldecode(str_replace("%23", "#", $log['url'])); ?></a></td>
+                                        <td><a data-action="ua" href="#" title="<?php echo $log['ua'];?>"><?php echo $log['display_name']; ?></a></td>
+                                        <td><a data-action="ip" data-ip="<?php echo $access->long2ip($log['ip']); ?>" href="#"><?php echo $access->long2ip($log['ip']); ?></a><?php if($request->filter != 'ip'): ?> <a target="_self" href="<?php $options->adminUrl('extending.php?panel=' . AccessPlugin::$panel . '&filter=ip&ip=' . $access->long2ip($log['ip']) . '&type='. $request->type); ?>">[ ? ]</a><?php endif; ?></td>
+                                        <td><a target="_blank" data-action="referer" href="<?php echo $log['referer']; ?>"><?php echo $log['referer']; ?></a></td>
+                                        <td><?php echo date('Y-m-d H:i:s',$log['time']); ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <tr>
+                                    <td colspan="6"><h6 class="typecho-list-table-title"><?php _e('当前无日志'); ?></h6></td>
+                                </tr>
+                            <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </form><!-- end .operate-form -->
+                <form class="typecho-list-operate" method="get">
                     <div class="operate">
                         <label><i class="sr-only"><?php _e('全选'); ?></i><input type="checkbox" class="typecho-table-select-all" /></label>
                         <div class="btn-group btn-drop">
@@ -35,119 +140,15 @@ $access = new Access_Core();
                             </ul>
                         </div>
                     </div>
-
-                    <form method="get" class="search-form">
-                        <div class="search" role="search">
-                            <?php if ($request->get('filter', 'all') != 'all'): ?>
-                            <a href="<?php $options->adminUrl('extending.php?panel=' . Access_Plugin::$panel . '&action=logs'); ?>"><?php _e('&laquo; 取消筛选'); ?></a>
-                            <?php endif; ?>
-                            <input type="hidden" value="<?php echo $request->get('panel'); ?>" name="panel" />
-                            <?php if(isset($request->page)): ?>
-                            <input type="hidden" value="<?php echo $request->get('page'); ?>" name="page" />
-                            <?php endif; ?>
-                            <label>
-                                <select name="filter">
-                                    <option <?php if($request->filter == 'all'): ?> selected="true" <?php endif; ?>value="all"><?php _e('全部条件'); ?></option>
-                                    <option <?php if($request->filter == 'ip'): ?> selected="true" <?php endif; ?>value="ip"><?php _e('按IP'); ?></option>
-                                    <option <?php if($request->filter == 'post'): ?> selected="true" <?php endif; ?>value="post"><?php _e('按文章'); ?></option>
-                                    <option <?php if($request->filter == 'path'): ?> selected="true" <?php endif; ?>value="path"><?php _e('按路由'); ?></option>
-                                </select>
-                            </label>
-                            <label>
-                                <input style="<?php if($request->get('filter', 'all') != 'ip'): ?>display: none<?php endif; ?>" type="text" class="text-s" placeholder="" value="<?php echo htmlspecialchars($request->ip); ?>" name="ip" />
-                            </label>
-                            <label>
-                                <select style="<?php if($request->get('filter', 'all') != 'post'): ?>display: none<?php endif; ?>" name="cid">
-                                    <?php foreach ($access->logs['cidList'] as $content):?>
-                                    <option <?php if($request->cid == $content['cid']): ?> selected="true" <?php endif; ?>value="<?php echo $content['cid'];?>"><?php echo $content['title'];?> (<?php echo $content['count'];?>)</option>
-                                    <?php endforeach;?>
-                                </select>
-                            </label>
-                            <label>
-                                <input style="<?php if($request->get('filter', 'all') != 'path'): ?>display: none<?php endif; ?>" type="text" class="text-s" placeholder="" value="<?php echo htmlspecialchars($request->path); ?>" name="path" />
-                            </label>
-                            <label>
-                                <select name="type">
-                                    <option <?php if($request->type == 1): ?> selected="true" <?php endif; ?>value="1"><?php _e('默认（仅人类）'); ?></option>
-                                    <option <?php if($request->type == 2): ?> selected="true" <?php endif; ?>value="2"><?php _e('筛选（仅爬虫）'); ?></option>
-                                    <option <?php if($request->type == 3): ?> selected="true" <?php endif; ?>value="3"><?php _e('所有'); ?></option>
-                                </select>
-                            </label>
-                            <input type="hidden" name="page" value="1">
-                                <button type="button" class="btn btn-s"><?php _e('筛选'); ?></button>
-                        </div>
-                    </form>
-                </div><!-- end .typecho-list-operate -->
-
-                <form method="post" class="operate-form">
-                <div class="typecho-table-wrap">
-                    <table class="typecho-list-table">
-                        <colgroup>
-                            <col width="5%"/>
-                            <col width="20%"/>
-                            <col width="25%"/>
-                            <col width="18%"/>
-                            <col width="20%"/>
-                            <col width="15%"/>
-                        </colgroup>
-                        <thead>
-                            <tr>
-                                <th>\</th>
-                                <th><?php _e('Path'); ?></th>
-                                <th><?php _e('UA'); ?></th>
-                                <th><?php _e('IP'); ?></th>
-                                <th><?php _e('Referrals'); ?></th>
-                                <th><?php _e('Date'); ?></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if(!empty($access->logs['list'])): ?>
-                            <?php foreach ($access->logs['list'] as $log): ?>
-                            <tr id="<?php echo $log['id']; ?>" data-id="<?php echo $log['id']; ?>">
-                                <td><label><input type="checkbox" data-id="<?php echo $log['id']; ?>" value="<?php echo $log['id']; ?>" name="id[]"/></label></td>
-                                <td><a target="_self" href="<?php $options->adminUrl('extending.php?panel=' . Access_Plugin::$panel . '&filter=path&path=' . $log['path'] . '&type='. $request->type); ?>"><?php echo urldecode(str_replace("%23", "#", $log['url'])); ?></a></td>
-                                <td><a data-action="ua" href="#" title="<?php echo $log['ua'];?>"><?php echo $log['display_name']; ?></a></td>
-                                <td><a data-action="ip" data-ip="<?php echo $access->long2ip($log['ip']); ?>" href="#"><?php echo $access->long2ip($log['ip']); ?></a><?php if($request->filter != 'ip'): ?> <a target="_self" href="<?php $options->adminUrl('extending.php?panel=' . Access_Plugin::$panel . '&filter=ip&ip=' . $access->long2ip($log['ip']) . '&type='. $request->type); ?>">[ ? ]</a><?php endif; ?></td>
-                                <td><a target="_blank" data-action="referer" href="<?php echo $log['referer']; ?>"><?php echo $log['referer']; ?></a></td>
-                                <td><?php echo date('Y-m-d H:i:s',$log['time']); ?></td>
-                            </tr>
-                            <?php endforeach; ?>
-                            <?php else: ?>
-                            <tr>
-                                <td colspan="6"><h6 class="typecho-list-table-title"><?php _e('当前无日志'); ?></h6></td>
-                            </tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
-                </div>
-                </form><!-- end .operate-form -->
-
-                <div class="typecho-list-operate clearfix">
-                    <form method="get">
-
-                        <div class="operate">
-                            <label><i class="sr-only"><?php _e('全选'); ?></i><input type="checkbox" class="typecho-table-select-all" /></label>
-                            <div class="btn-group btn-drop">
-                                <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only"><?php _e('操作'); ?></i><?php _e('选中项'); ?> <i class="i-caret-down"></i></button>
-                                <ul class="dropdown-menu">
-                                    <li><a data-action="delete" href="javascript:"><?php _e('删除'); ?></a></li>
-                                </ul>
-                            </div>
-                        </div>
-
-
-                        <?php if($access->logs['rows'] > 1): ?>
+                    <?php if($access->logs['rows'] > 1): ?>
                         <ul class="typecho-pager">
                             <?php echo $access->logs['page']; ?>
                         </ul>
-                        <?php endif; ?>
-                    </form>
-                </div><!-- end .typecho-list-operate -->
+                    <?php endif; ?>
+                </form>
             </div><!-- end .typecho-list -->
 
             <?php elseif($access->action == 'overview'):?>
-
-
 
             <div class="col-mb-12 typecho-list">
 
@@ -262,7 +263,7 @@ $access = new Access_Core();
 
         </div><!-- end .typecho-page-main -->
     </div>
-</div>
+</main>
 
 <?php
 include 'copyright.php';
@@ -351,19 +352,19 @@ $(document).ready(function() {
     const $filterSelect = $form.find('select[name="filter"]');
 
     $filterSelect.on('change', function() {
-        $ipInput.removeAttr('placeholder').val('').hide();
-        $cidSelect.hide();
-        $pathInput.removeAttr('placeholder').val('').hide();
+        $ipInput.removeAttr('placeholder').val('').parent('label').hide();
+        $cidSelect.parent('label').hide();
+        $pathInput.removeAttr('placeholder').val('').parent('label').hide();
 
         switch ($filterSelect.val()) {
             case 'ip':
-                $ipInput.attr('placeholder', '输入IP').show();
+                $ipInput.attr('placeholder', '输入IP').parent('label').show();
                 break;
             case 'post':
-                $cidSelect.show();
+                $cidSelect.parent('label').show();
                 break;
             case 'path':
-                $pathInput.attr('placeholder', '输入路由').show();
+                $pathInput.attr('placeholder', '输入路由').parent('label').show();
                 break;
         }
     });
