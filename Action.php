@@ -2,6 +2,7 @@
 
 namespace TypechoPlugin\Access;
 
+use RuntimeException;
 use Typecho\Widget;
 use Widget\ActionInterface;
 
@@ -29,7 +30,7 @@ class Action extends Widget implements ActionInterface
     {
     }
 
-    public function writeLogs()
+    public function writeLogs(): void
     {
         $image = base64_decode('R0lGODlhAQABAIAAAAAAAP///yH5BAQUAP8ALAAAAAABAAEAAAICRAEAOw==');
         $this->response->setContentType('image/gif');
@@ -39,7 +40,7 @@ class Action extends Widget implements ActionInterface
         echo $image;
     }
 
-    public function ip()
+    public function ipAnalyze(): void
     {
         $ip = $this->request->get('ip');
         try {
@@ -61,7 +62,7 @@ class Action extends Widget implements ActionInterface
                     ],
                 ];
             } else {
-                throw new \RuntimeException('解析 IP 失败');
+                throw new RuntimeException('解析 IP 失败');
             }
         } catch (\Exception $e) {
             try {
@@ -98,14 +99,14 @@ class Action extends Widget implements ActionInterface
         $this->response->throwJson($response);
     }
 
-    public function deleteLogs()
+    public function deleteLogs(): void
     {
         try {
             $this->checkAuth();
             $data = @file_get_contents('php://input');
             $data = json_decode($data, true);
             if (!is_array($data)) {
-                throw new \RuntimeException('params invalid');
+                throw new RuntimeException('params invalid');
             }
             $this->getAccess()->deleteLogs($data);
             $response = [
@@ -124,7 +125,7 @@ class Action extends Widget implements ActionInterface
     /**
      * 概览页懒加载数据接口
      */
-    public function overview()
+    public function overview(): void
     {
         try {
             $this->checkAuth();
@@ -143,10 +144,41 @@ class Action extends Widget implements ActionInterface
         $this->response->throwJson($response);
     }
 
-    protected function checkAuth()
+    /**
+     * 日志页懒加载数据接口
+     */
+    public function logsParse(): void
+    {
+        try {
+            $this->checkAuth();
+            $page   = (int)$this->request->get('page', 1);
+            $type   = (int)$this->request->get('type', 1);
+            $filter = $this->request->get('filter', 'all');
+            $filterValue = '';
+            switch ($filter) {
+                case 'ip':   $filterValue = $this->request->get('ip', '');   break;
+                case 'post': $filterValue = $this->request->get('cid', '');  break;
+                case 'path': $filterValue = $this->request->get('path', ''); break;
+            }
+            $data = $this->getAccess()->getLogsData($page, $type, $filter, $filterValue);
+            $response = [
+                'code' => 0,
+                'data' => $data,
+            ];
+        } catch (\Exception $e) {
+            $response = [
+                'code' => 500,
+                'data' => $e->getMessage(),
+            ];
+        }
+
+        $this->response->throwJson($response);
+    }
+
+    protected function checkAuth(): void
     {
         if (!$this->getAccess()->isAdmin()) {
-            throw new \RuntimeException('Access Denied');
+            throw new RuntimeException('Access Denied');
         }
     }
 

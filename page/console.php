@@ -68,10 +68,8 @@ $access = new Core();
                             <input type="text" class="text-s" placeholder="" value="<?php echo htmlspecialchars($request->ip); ?>" name="ip" />
                         </label>
                         <label style="<?php if($request->get('filter', 'all') != 'post'): ?>display: none<?php endif; ?>">
-                            <select name="cid">
-                                <?php foreach ($access->logs['cidList'] as $content):?>
-                                    <option <?php if($request->cid == $content['cid']): ?> selected <?php endif; ?>value="<?php echo $content['cid'];?>"><?php echo $content['title'];?> (<?php echo $content['count'];?>)</option>
-                                <?php endforeach;?>
+                            <select name="cid" id="cid-select">
+                                <option value=""><?php _e('加载中…'); ?></option>
                             </select>
                         </label>
                         <label style="<?php if($request->get('filter', 'all') != 'path'): ?>display: none<?php endif; ?>">
@@ -109,23 +107,8 @@ $access = new Core();
                                 <th><?php _e('Date'); ?></th>
                             </tr>
                             </thead>
-                            <tbody>
-                            <?php if(!empty($access->logs['list'])): ?>
-                                <?php foreach ($access->logs['list'] as $log): ?>
-                                    <tr id="<?php echo $log['id']; ?>" data-id="<?php echo $log['id']; ?>">
-                                        <td><label><input type="checkbox" data-id="<?php echo $log['id']; ?>" value="<?php echo $log['id']; ?>" name="id[]"/></label></td>
-                                        <td><a target="_self" href="<?php $options->adminUrl('extending.php?panel=' . AccessPlugin::$panel . '&filter=path&path=' . $log['path'] . '&type='. $request->type); ?>"><?php echo urldecode(str_replace("%23", "#", $log['url'])); ?></a></td>
-                                        <td><a data-action="ua" href="#" title="<?php echo $log['ua'];?>"><?php echo $log['display_name']; ?></a></td>
-                                        <td><a data-action="ip" data-ip="<?php echo $access->long2ip($log['ip']); ?>" href="#"><?php echo $access->long2ip($log['ip']); ?></a><?php if($request->filter != 'ip'): ?> <a target="_self" href="<?php $options->adminUrl('extending.php?panel=' . AccessPlugin::$panel . '&filter=ip&ip=' . $access->long2ip($log['ip']) . '&type='. $request->type); ?>">[ ? ]</a><?php endif; ?></td>
-                                        <td><a target="_blank" data-action="referer" href="<?php echo $log['referer']; ?>"><?php echo $log['referer']; ?></a></td>
-                                        <td><?php echo date('Y-m-d H:i:s',$log['time']); ?></td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <tr>
-                                    <td colspan="6"><h6 class="typecho-list-table-title"><?php _e('当前无日志'); ?></h6></td>
-                                </tr>
-                            <?php endif; ?>
+                            <tbody id="logs-table-body">
+                                <tr><td colspan="6" class="access-skeleton" style="height:300px"><?php _e('加载中…'); ?></td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -140,11 +123,7 @@ $access = new Core();
                             </ul>
                         </div>
                     </div>
-                    <?php if($access->logs['rows'] > 1): ?>
-                        <ul class="typecho-pager">
-                            <?php echo $access->logs['page']; ?>
-                        </ul>
-                    <?php endif; ?>
+                    <ul class="typecho-pager" id="logs-pager"></ul>
                 </form>
             </div><!-- end .typecho-list -->
 
@@ -256,16 +235,35 @@ include 'common-js.php';
 include 'table-js.php';
 ?>
 <script type="text/javascript">
-$(document).ready(function() {
-    $('a[data-action="ua"]').click(function() {
+function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+}
+
+function formatDate(ts) {
+    var d = new Date(ts * 1000);
+    var pad = function(n) { return n < 10 ? '0' + n : n; };
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+         + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
+var logsApiUrl = '<?php echo rtrim(Helper::options()->index, '/') . '/access/logs/get.json'; ?>';
+var ipApiUrl   = '<?php echo rtrim(Helper::options()->index, '/') . '/access/ip.json'; ?>';
+var deleteApiUrl = '<?php echo rtrim(Helper::options()->index, '/') . '/access/logs/delete.json'; ?>';
+var adminUrl   = '<?php echo rtrim(Helper::options()->adminUrl, '/'); ?>';
+var panelName  = '<?php echo AccessPlugin::$panel; ?>';
+
+function bindLogEvents() {
+    $('a[data-action="ua"]').off('click').on('click', function() {
         swal('User-Agent', $.trim($(this).attr('title')), 'info');
         return false;
     });
 
-    $('a[data-action="ip"]').click(function() {
+    $('a[data-action="ip"]').off('click').on('click', function() {
         swal('IP 查询中...', '正在查询...', 'info');
         $.ajax({
-            url: '<?php echo rtrim(Helper::options()->index, '/').'/access/ip.json';?>',
+            url: ipApiUrl,
             method: 'get',
             dataType: 'json',
             data: {ip: $(this).data('ip')},
@@ -286,36 +284,122 @@ $(document).ready(function() {
         });
         return false;
     });
+}
 
-    $('.dropdown-menu a[data-action="delete"]').click(function() {
-        swal({
-          title: '确认操作',
-          text: '是否删除选定的记录？',
-          type: 'warning',
-          showCancelButton: true,
-          confirmButtonColor: '#DD6B55',
-          confirmButtonText: '是',
-          cancelButtonText: '否',
-          closeOnConfirm: false
-        }, function() {
-            const ids = [];
-            $('.typecho-list-table input[type="checkbox"]').each(function(index, elem) {
+$(document).ready(function() {
+    // ── 日志页懒加载 ──
+    <?php if($access->action == 'logs'): ?>
+    (function() {
+        var currentFilter = '<?php echo $request->get('filter', 'all'); ?>';
+        var currentType   = '<?php echo (int)$request->get('type', 1); ?>';
+        var params = {
+            page:   '<?php echo (int)$request->get('page', 1); ?>',
+            type:   currentType,
+            filter: currentFilter
+        };
+        <?php if ($request->get('filter') == 'ip'): ?>
+            params.ip = '<?php echo htmlspecialchars($request->ip); ?>';
+        <?php elseif ($request->get('filter') == 'post'): ?>
+            params.cid = '<?php echo htmlspecialchars($request->cid); ?>';
+        <?php elseif ($request->get('filter') == 'path'): ?>
+            params.path = '<?php echo htmlspecialchars($request->path); ?>';
+        <?php endif; ?>
+
+        $.ajax({
+            url: logsApiUrl,
+            method: 'get',
+            dataType: 'json',
+            data: params,
+            success: function(res) {
+                if (res.code !== 0) {
+                    $('#logs-table-body').html('<tr><td colspan="6">加载失败</td></tr>');
+                    return;
+                }
+                var d = res.data;
+
+                // ── 填充文章筛选下拉框 ──
+                var $cidSelect = $('#cid-select');
+                $cidSelect.empty();
+                if (d.cidList && d.cidList.length) {
+                    $.each(d.cidList, function(i, c) {
+                        var sel = (params.cid && params.cid == c.cid) ? ' selected' : '';
+                        $cidSelect.append('<option value="' + escapeHtml(String(c.cid)) + '"' + sel + '>' + escapeHtml(String(c.title)) + ' (' + c.count + ')</option>');
+                    });
+                }
+
+                // ── 填充日志表格 ──
+                var html = '';
+                if (d.list && d.list.length) {
+                    $.each(d.list, function(i, log) {
+                        var pathUrl = adminUrl + '/extending.php?panel=' + encodeURIComponent(panelName) + '&filter=path&path=' + encodeURIComponent(log.path) + '&type=' + currentType;
+                        var decodedUrl = log.url;
+                        try { decodedUrl = decodeURIComponent(log.url.replace(/%23/g, '#')); } catch(e) {}
+
+                        html += '<tr id="' + log.id + '" data-id="' + log.id + '">';
+                        html += '<td><label><input type="checkbox" data-id="' + log.id + '" value="' + log.id + '" name="id[]"/></label></td>';
+                        html += '<td><a target="_self" href="' + escapeHtml(pathUrl) + '">' + escapeHtml(decodedUrl) + '</a></td>';
+                        html += '<td><a data-action="ua" href="#" title="' + escapeHtml(String(log.ua)) + '">' + escapeHtml(String(log.display_name)) + '</a></td>';
+
+                        var ipDisplay = log.ip_display || log.ip;
+                        html += '<td><a data-action="ip" data-ip="' + escapeHtml(String(ipDisplay)) + '" href="#">' + escapeHtml(String(ipDisplay)) + '</a>';
+                        if (currentFilter !== 'ip') {
+                            var ipFilterUrl = adminUrl + '/extending.php?panel=' + encodeURIComponent(panelName) + '&filter=ip&ip=' + encodeURIComponent(ipDisplay) + '&type=' + currentType;
+                            html += ' <a target="_self" href="' + escapeHtml(ipFilterUrl) + '">[ ? ]</a>';
+                        }
+                        html += '</td>';
+
+                        html += '<td><a target="_blank" data-action="referer" href="' + escapeHtml(String(log.referer)) + '">' + escapeHtml(String(log.referer)) + '</a></td>';
+                        html += '<td>' + formatDate(log.time) + '</td>';
+                        html += '</tr>';
+                    });
+                } else {
+                    html = '<tr><td colspan="6"><h6 class="typecho-list-table-title">当前无日志</h6></td></tr>';
+                }
+                $('#logs-table-body').html(html);
+
+                // ── 填充分页 ──
+                if (d.rows > 1 && d.page) {
+                    $('#logs-pager').html(d.page);
+                }
+
+                // ── 绑定事件 ──
+                bindLogEvents();
+            },
+            error: function() {
+                $('#logs-table-body').html('<tr><td colspan="6">加载失败</td></tr>');
+            }
+        });
+
+        // ── 删除按钮 ──
+        $('.dropdown-menu a[data-action="delete"]').click(function() {
+            swal({
+              title: '确认操作',
+              text: '是否删除选定的记录？',
+              type: 'warning',
+              showCancelButton: true,
+              confirmButtonColor: '#DD6B55',
+              confirmButtonText: '是',
+              cancelButtonText: '否',
+              closeOnConfirm: false
+            }, function() {
+                var ids = [];
+                $('.typecho-list-table input[type="checkbox"]').each(function(index, elem) {
                     if (elem.checked) {
                         ids.push($(elem).data('id'));
                     }
                 });
 
-                if (ids.length == 0) {
+                if (ids.length === 0) {
                     return swal('错误', '并没有勾选任何内容', 'warning');
                 }
                 $.ajax({
-                    url: '<?php echo rtrim(Helper::options()->index, '/').'/access/log/delete.json';?>',
+                    url: deleteApiUrl,
                     method: 'post',
                     dataType: 'json',
                     contentType: 'application/json',
                     data: JSON.stringify(ids),
                     success: function(data) {
-                        if (data.code == 0) {
+                        if (data.code === 0) {
                             swal('删除成功', '所选记录已删除', 'success');
                             $.each(ids, function(index, elem) {
                                 $('.typecho-list-table tbody tr[data-id="' + elem + '"]').fadeOut(500).remove();
@@ -325,44 +409,47 @@ $(document).ready(function() {
                         }
                     }
                 });
+            });
+            var $this = $(this);
+            $this.parents('.dropdown-menu').hide().prev().removeClass('active');
         });
-        const $this = $(this);
-        $this.parents('.dropdown-menu').hide().prev().removeClass('active');
-    });
 
-    const $form = $('form.search-form');
-    const $ipInput = $form.find('input[name="ip"]');
-    const $cidSelect = $form.find('select[name="cid"]');
-    const $pathInput = $form.find('input[name="path"]');
-    const $filterSelect = $form.find('select[name="filter"]');
+        // ── 筛选控件 ──
+        var $form = $('form.search-form');
+        var $ipInput = $form.find('input[name="ip"]');
+        var $cidSelect = $form.find('select[name="cid"]');
+        var $pathInput = $form.find('input[name="path"]');
+        var $filterSelect = $form.find('select[name="filter"]');
 
-    $filterSelect.on('change', function() {
-        $ipInput.removeAttr('placeholder').val('').parent('label').hide();
-        $cidSelect.parent('label').hide();
-        $pathInput.removeAttr('placeholder').val('').parent('label').hide();
+        $filterSelect.on('change', function() {
+            $ipInput.removeAttr('placeholder').val('').parent('label').hide();
+            $cidSelect.parent('label').hide();
+            $pathInput.removeAttr('placeholder').val('').parent('label').hide();
 
-        switch ($filterSelect.val()) {
-            case 'ip':
-                $ipInput.attr('placeholder', '输入IP').parent('label').show();
-                break;
-            case 'post':
-                $cidSelect.parent('label').show();
-                break;
-            case 'path':
-                $pathInput.attr('placeholder', '输入路由').parent('label').show();
-                break;
-        }
-    });
+            switch ($filterSelect.val()) {
+                case 'ip':
+                    $ipInput.attr('placeholder', '输入IP').parent('label').show();
+                    break;
+                case 'post':
+                    $cidSelect.parent('label').show();
+                    break;
+                case 'path':
+                    $pathInput.attr('placeholder', '输入路由').parent('label').show();
+                    break;
+            }
+        });
 
-    $form.find('button[type="button"]').on('click', function() {
-        const ipRegex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+        $form.find('button[type="button"]').on('click', function() {
+            var ipRegex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
 
-        if ($filterSelect.val() == 'ip' && !ipRegex.test($ipInput.val())) {
-            return swal('筛选条件错误', 'IP 地址不合法', 'warning');
-        }
+            if ($filterSelect.val() === 'ip' && !ipRegex.test($ipInput.val())) {
+                return swal('筛选条件错误', 'IP 地址不合法', 'warning');
+            }
 
-        $form.submit();
-    });
+            $form.submit();
+        });
+    })();
+    <?php endif; ?>
 });
 </script>
 <script src="<?php $options->pluginUrl('Access/sweetalert/sweetalert.min.js')?>"></script>
@@ -388,11 +475,6 @@ $(document).ready(function() {
         });
     };
 
-    function escapeHtml(str) {
-        var div = document.createElement('div');
-        div.appendChild(document.createTextNode(str));
-        return div.innerHTML;
-    }
 
     $(document).ready(function() {
         $.ajax({

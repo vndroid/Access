@@ -48,9 +48,10 @@ class Plugin implements PluginInterface
         $msg = self::install();
         Helper::addPanel(1, self::$panel, _t('访问统计'), _t('统计控制台'), 'subscriber');
         Helper::addRoute('access_track_gif', '/access/log/track.gif', '\TypechoPlugin\Access\Action', 'writeLogs');
-        Helper::addRoute('access_ip', '/access/ip.json', '\TypechoPlugin\Access\Action', 'ip');
-        Helper::addRoute('access_delete_logs', '/access/log/delete.json', '\TypechoPlugin\Access\Action', 'deleteLogs');
-        Helper::addRoute('access_overview', '/access/overview.json', '\TypechoPlugin\Access\Action', 'overview');
+        Helper::addRoute('access_ip_analyze', '/access/ip.json', '\TypechoPlugin\Access\Action', 'ipAnalyze');
+        Helper::addRoute('access_logs_delete', '/access/logs/delete.json', '\TypechoPlugin\Access\Action', 'deleteLogs');
+        Helper::addRoute('access_logs_overview', '/access/overview.json', '\TypechoPlugin\Access\Action', 'overview');
+        Helper::addRoute('access_logs_details', '/access/logs/get.json', '\TypechoPlugin\Access\Action', 'logsParse');
         TypechoPlugin::factory('\Widget\Archive')->beforeRender = [__CLASS__, 'backend'];
         TypechoPlugin::factory('\Widget\Archive')->footer = [__CLASS__, 'frontend'];
         TypechoPlugin::factory('admin/footer.php')->end = [__CLASS__, 'adminFooter'];
@@ -81,9 +82,10 @@ class Plugin implements PluginInterface
         }
         Helper::removePanel(1, self::$panel);
         Helper::removeRoute('access_track_gif');
-        Helper::removeRoute('access_ip');
-        Helper::removeRoute('access_delete_logs');
-        Helper::removeRoute('access_overview');
+        Helper::removeRoute('access_ip_analyze');
+        Helper::removeRoute('access_logs_delete');
+        Helper::removeRoute('access_logs_overview');
+        Helper::removeRoute('access_logs_details');
 
         return _t($cleanFlag ? '插件已禁用，数据表已清除' : '插件已禁用，数据表已保留');
     }

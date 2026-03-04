@@ -69,7 +69,6 @@ class Core
             default:
                 $this->action = 'logs';
                 $this->title = _t('访问日志');
-                $this->parseLogs();
                 break;
         }
     }
@@ -97,21 +96,23 @@ class Core
     }
 
     /**
-     * 生成详细访问日志数据，提供给页面渲染使用
+     * 获取日志页全部数据（供 AJAX 接口调用）
      *
-     * @access protected
-     * @return void
+     * @access public
+     * @param int    $page   页码
+     * @param int    $type   类型 1=人类 2=爬虫 3=全部
+     * @param string $filter 筛选类型 all/ip/post/path
+     * @param string $filterValue 筛选值
+     * @return array
      */
-    protected function parseLogs()
+    public function getLogsData(int $page, int $type, string $filter, string $filterValue): array
     {
-        $type = $this->request->get('type', 1);
-        $filter = $this->request->get('filter', 'all');
-        $pagenum = $this->request->get('page', 1);
-        $offset = (max((int)$pagenum, 1) - 1) * $this->config->pageSize;
+        $offset = (max($page, 1) - 1) * $this->config->pageSize;
         $query = $this->db->select()->from('table.access')
             ->order('time', Db::SORT_DESC)
             ->offset($offset)->limit($this->config->pageSize);
         $qcount = $this->db->select('count(1) AS count')->from('table.access');
+
         switch ($type) {
             case 1:
                 $query->where('robot = ?', 0);
@@ -121,30 +122,26 @@ class Core
                 $query->where('robot = ?', 1);
                 $qcount->where('robot = ?', 1);
                 break;
-            default:
-                break;
         }
+
         switch ($filter) {
             case 'ip':
-                $ip = $this->request->get('ip', '');
-                $ip = bindec(decbin(ip2long($ip)));
+                $ip = bindec(decbin(ip2long($filterValue)));
                 $query->where('ip = ?', $ip);
                 $qcount->where('ip = ?', $ip);
                 break;
             case 'post':
-                $cid = $this->request->get('cid', '');
-                $query->where('content_id = ?', $cid);
-                $qcount->where('content_id = ?', $cid);
+                $query->where('content_id = ?', $filterValue);
+                $qcount->where('content_id = ?', $filterValue);
                 break;
             case 'path':
-                $path = $this->request->get('path', '');
-                $query->where('path = ?', $path);
-                $qcount->where('path = ?', $path);
+                $query->where('path = ?', $filterValue);
+                $qcount->where('path = ?', $filterValue);
                 break;
         }
+
         $list = $this->db->fetchAll($query);
         foreach ($list as &$row) {
-            // 优先使用已存储的 browser_id/robot_id，避免重复解析 UA
             if (!empty($row['robot']) && $row['robot'] == 1) {
                 $name = $row['robot_id'] ?? '';
                 $version = $row['robot_version'] ?? '';
@@ -152,7 +149,6 @@ class Core
                 $name = $row['browser_id'] ?? '';
                 $version = $row['browser_version'] ?? '';
             }
-            // 仅在存储字段为空时才回退到 UA 解析
             if ($name === '' && !empty($row['ua'])) {
                 $ua = new UA($row['ua']);
                 if ($ua->isRobot()) {
@@ -170,33 +166,37 @@ class Core
             } else {
                 $row['display_name'] = $name . ' / ' . $version;
             }
+            // 转换 IP 以便前端直接使用
+            $row['ip_display'] = $this->long2ip($row['ip']);
         }
-        $this->logs['list'] = $this->htmlEncode($this->urlDecode($list));
+        $list = $this->htmlEncode($this->urlDecode($list));
+        $rows = (int)$this->db->fetchAll($qcount)[0]['count'];
 
-        $this->logs['rows'] = $this->db->fetchAll($qcount)[0]['count'];
-
-        $filter = $this->request->get('filter', 'all');
-        $filterOptions = $this->request->get($filter);
-        $filterArr = [
-            'filter' => $filter,
-            $filter => $filterOptions
-        ];
-
-        $page = new Page($this->config->pageSize, $this->logs['rows'], $pagenum, 10, array_merge($filterArr, [
+        $filterArr = ['filter' => $filter];
+        if ($filter !== 'all') {
+            $filterArr[$filter] = $filterValue;
+        }
+        $pageObj = new Page($this->config->pageSize, $rows, $page, 10, array_merge($filterArr, [
             'panel' => Plugin::$panel,
             'action' => 'logs',
             'type' => $type,
         ]));
-        $this->logs['page'] = $page->show();
 
-        $this->logs['cidList'] = $this->db->fetchAll($this->db->select('DISTINCT content_id as cid, COUNT(1) as count, table.contents.title as title')
-                ->from('table.access')
-                ->join('table.contents', 'table.access.content_id = table.contents.cid')
-                ->where('table.access.content_id IS NOT NULL')
-                ->where('table.contents.type = ?', 'post')
-                ->group('table.access.content_id')
-                ->group('table.contents.title')
-                ->order('count', Db::SORT_DESC));
+        $cidList = $this->db->fetchAll($this->db->select('DISTINCT content_id as cid, COUNT(1) as count, table.contents.title as title')
+            ->from('table.access')
+            ->join('table.contents', 'table.access.content_id = table.contents.cid')
+            ->where('table.access.content_id IS NOT NULL')
+            ->where('table.contents.type = ?', 'post')
+            ->group('table.access.content_id')
+            ->group('table.contents.title')
+            ->order('count', Db::SORT_DESC));
+
+        return [
+            'list'    => $list,
+            'rows'    => $rows,
+            'page'    => $pageObj->show(),
+            'cidList' => $cidList,
+        ];
     }
 
     /**
