@@ -321,105 +321,172 @@ class Core
 
     /**
      * 生成总览数据，提供给页面渲染使用
+     * "昨日"、"总计"、"当月" 优先从 Redis 缓存读取；"今日" 始终实时查询
      *
      * @access protected
      * @return void
      */
     protected function parseOverview(): void
     {
-        $types = ['today', 'yesterday', 'month'];
-        # 分类分时段统计数据
-        foreach ($types as $type) {
-            if ($type == 'today' || $type == 'yesterday') {
-                if ($type == 'today')
-                    $time = date("Y-m-d");
-                else
-                    $time = date("Y-m-d", strtotime('-1 day'));
-                $this->overview[$type]['time'] = $time;
+        // ── 今日数据：始终实时查询，保证准确性 ──
+        $this->overview['today'] = $this->queryDayOverview(date("Y-m-d"));
 
-                # 按小时统计数据
-                for ($hour = 0; $hour < 24; $hour++) {
-                    $start = strtotime(date("{$time} {$hour}:00:00"));
-                    $end = strtotime(date("{$time} {$hour}:59:59"));
-                    $subQuery = $this->db->select('DISTINCT ip')->from('table.access')
-                        ->where("time >= ? AND time <= ?", $start, $end);
-                    if (method_exists($subQuery, 'prepare')) {
-                        $subQuery = $subQuery->prepare($subQuery);
-                    }
-                    $this->overview[$type]['ip']['detail'][$hour] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
-                    $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')
-                        ->where("time >= ? AND time <= ?", $start, $end);
-                    if (method_exists($subQuery, 'prepare')) {
-                        $subQuery = $subQuery->prepare($subQuery);
-                    }
-                    $this->overview[$type]['uv']['detail'][$hour] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
-                    $this->overview[$type]['pv']['detail'][$hour] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count'];
-                }
-
-                # 统计当天总数据
-                $start = strtotime(date("{$time} 00:00:00"));
-                $end = strtotime(date("{$time} 23:59:59"));
-
-                $subQuery = $this->db->select('DISTINCT ip')->from('table.access')->where("time >= ? AND time <= ?", $start, $end);
-                if (method_exists($subQuery, 'prepare')) {
-                    $subQuery = $subQuery->prepare($subQuery);
-                }
-                $this->overview[$type]['ip']['count'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')->from('(' . $subQuery . ') AS tmp'))[0]['count'];
-
-                $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')->where("time >= ? AND time <= ?", $start, $end);
-                if (method_exists($subQuery, 'prepare')) {
-                    $subQuery = $subQuery->prepare($subQuery);
-                }
-                $this->overview[$type]['uv']['count'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')->from('(' . $subQuery . ') AS tmp'))[0]['count'];
-
-                $this->overview[$type]['pv']['count'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                    ->from('table.access')
-                    ->where("time >= ? AND time <= ?", $start, $end)
-                )[0]['count'];
-            } elseif ($type == 'month') {
-                $year = date('Y');
-                $month = date("m");
-                $monthDays = cal_days_in_month(CAL_GREGORIAN, (int)$month, (int)$year);
-                $this->overview[$type]['time'] = $month;
-
-                # 按天统计数据
-                for ($day = 1; $day <= $monthDays; $day++) {
-                    $start = strtotime(date("{$year}-{$month}-{$day} 00:00:00"));
-                    $end = strtotime(date("{$year}-{$month}-{$day} 23:59:59"));
-
-                    $subQuery = $this->db->select('DISTINCT ip')->from('table.access')
-                        ->where('time >= ? AND time <= ?', $start, $end);
-                    if (method_exists($subQuery, 'prepare')) {
-                        $subQuery = $subQuery->prepare($subQuery);
-                    }
-                    $this->overview[$type]['ip']['detail'][$day-1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
-                    $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')
-                        ->where('time >= ? AND time <= ?', $start, $end);
-                    if (method_exists($subQuery, 'prepare')) {
-                        $subQuery = $subQuery->prepare($subQuery);
-                    }
-                    $this->overview[$type]['uv']['detail'][$day-1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
-                    $this->overview[$type]['pv']['detail'][$day-1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                        ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count'];
-                }
-            }
+        // ── 昨日数据：缓存键包含日期，跨天自动失效 ──
+        $yesterdayDate = date("Y-m-d", strtotime('-1 day'));
+        $yesterdayCacheKey = 'overview:yesterday:' . $yesterdayDate;
+        $cached = $this->getCache($yesterdayCacheKey);
+        if ($cached !== null) {
+            $this->overview['yesterday'] = $cached;
+        } else {
+            $this->overview['yesterday'] = $this->queryDayOverview($yesterdayDate);
+            $this->setCache($yesterdayCacheKey, $this->overview['yesterday']);
         }
 
-        # 统计总计数据
-        $this->overview['total']['ip'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-            ->from('(' . $this->db->select('DISTINCT ip')->from('table.access') . ') AS tmp'))[0]['count'];
-        $this->overview['total']['uv'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-            ->from('(' . $this->db->select('DISTINCT ip,ua')->from('table.access') . ') AS tmp'))[0]['count'];
-        $this->overview['total']['pv'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-            ->from('table.access'))[0]['count'];
+        // ── 当月数据：按 TTL 缓存 ──
+        $monthCacheKey = 'overview:month:' . date('Y-m');
+        $cached = $this->getCache($monthCacheKey);
+        if ($cached !== null) {
+            $this->overview['month'] = $cached;
+        } else {
+            $this->overview['month'] = $this->queryMonthOverview();
+            $this->setCache($monthCacheKey, $this->overview['month']);
+        }
+
+        // ── 总计数据：按 TTL 缓存 ──
+        $totalCacheKey = 'overview:total';
+        $cached = $this->getCache($totalCacheKey);
+        if ($cached !== null) {
+            $this->overview['total'] = $cached;
+        } else {
+            $this->overview['total'] = $this->queryTotalOverview();
+            $this->setCache($totalCacheKey, $this->overview['total']);
+        }
 
         # 输出用于图表的Json
         $this->overview['chart_data'] = $this->makeChartJson();
+    }
+
+    /**
+     * 查询某一天的访问概览（按小时维度 + 当日汇总）
+     *
+     * @access protected
+     * @param string $date 日期，格式 Y-m-d
+     * @return array
+     */
+    protected function queryDayOverview(string $date): array
+    {
+        $result = ['time' => $date];
+        $dayStart = strtotime("{$date} 00:00:00");
+        $dayEnd   = strtotime("{$date} 23:59:59");
+
+        # 按小时统计明细
+        for ($hour = 0; $hour < 24; $hour++) {
+            $start = strtotime("{$date} {$hour}:00:00");
+            $end   = strtotime("{$date} {$hour}:59:59");
+
+            $subQuery = $this->db->select('DISTINCT ip')->from('table.access')
+                ->where("time >= ? AND time <= ?", $start, $end);
+            if (method_exists($subQuery, 'prepare')) {
+                $subQuery = $subQuery->prepare($subQuery);
+            }
+            $result['ip']['detail'][$hour] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
+
+            $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')
+                ->where("time >= ? AND time <= ?", $start, $end);
+            if (method_exists($subQuery, 'prepare')) {
+                $subQuery = $subQuery->prepare($subQuery);
+            }
+            $result['uv']['detail'][$hour] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
+
+            $result['pv']['detail'][$hour] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count'];
+        }
+
+        # 当日汇总
+        $subQuery = $this->db->select('DISTINCT ip')->from('table.access')
+            ->where("time >= ? AND time <= ?", $dayStart, $dayEnd);
+        if (method_exists($subQuery, 'prepare')) {
+            $subQuery = $subQuery->prepare($subQuery);
+        }
+        $result['ip']['count'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+            ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
+
+        $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')
+            ->where("time >= ? AND time <= ?", $dayStart, $dayEnd);
+        if (method_exists($subQuery, 'prepare')) {
+            $subQuery = $subQuery->prepare($subQuery);
+        }
+        $result['uv']['count'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+            ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
+
+        $result['pv']['count'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+            ->from('table.access')
+            ->where("time >= ? AND time <= ?", $dayStart, $dayEnd)
+        )[0]['count'];
+
+        return $result;
+    }
+
+    /**
+     * 查询当月访问概览（按天维度）
+     *
+     * @access protected
+     * @return array
+     */
+    protected function queryMonthOverview(): array
+    {
+        $year  = date('Y');
+        $month = date('m');
+        $monthDays = cal_days_in_month(CAL_GREGORIAN, (int)$month, (int)$year);
+        $result = ['time' => $month];
+
+        for ($day = 1; $day <= $monthDays; $day++) {
+            $start = strtotime("{$year}-{$month}-{$day} 00:00:00");
+            $end   = strtotime("{$year}-{$month}-{$day} 23:59:59");
+
+            $subQuery = $this->db->select('DISTINCT ip')->from('table.access')
+                ->where('time >= ? AND time <= ?', $start, $end);
+            if (method_exists($subQuery, 'prepare')) {
+                $subQuery = $subQuery->prepare($subQuery);
+            }
+            $result['ip']['detail'][$day - 1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
+
+            $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')
+                ->where('time >= ? AND time <= ?', $start, $end);
+            if (method_exists($subQuery, 'prepare')) {
+                $subQuery = $subQuery->prepare($subQuery);
+            }
+            $result['uv']['detail'][$day - 1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
+
+            $result['pv']['detail'][$day - 1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+                ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count'];
+        }
+
+        return $result;
+    }
+
+    /**
+     * 查询总计访问概览
+     *
+     * @access protected
+     * @return array
+     */
+    protected function queryTotalOverview(): array
+    {
+        $result = [];
+
+        $result['ip'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+            ->from('(' . $this->db->select('DISTINCT ip')->from('table.access') . ') AS tmp'))[0]['count'];
+        $result['uv'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+            ->from('(' . $this->db->select('DISTINCT ip,ua')->from('table.access') . ') AS tmp'))[0]['count'];
+        $result['pv'] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+            ->from('table.access'))[0]['count'];
+
+        return $result;
     }
 
     /**
