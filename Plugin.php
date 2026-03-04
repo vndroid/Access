@@ -153,11 +153,11 @@ class Plugin implements PluginInterface
                 '1' => '后端',
             ], '1', '统计类型', '日志写入类型（若选择为前端方式，如果使用了 PJAX，请在 PJAX 相关事件中调用 window.Access.track() 方法），若写入速度较慢可选择前端写入日志。'
         );
-        $isOversea = new Radio(
-            'isOversea', [
-                '0' => '中国大陆',
-                '1' => '其他国家或地区',
-            ], '1', '部署地点', '访客 IP 归属地判断接口种类，中国大陆接口在海外机器可能无法使用，请根据实际情况进行选择'
+        $isPaid = new Radio(
+            'isPaid', [
+                '0' => 'Lite',
+                '1' => 'Core',
+            ], '0', 'IPinfo 接口类型', '默认使用 Lite（免费版），字段相比 Core（付费版）少'
         );
         $ipInfoToken = new Text(
             'ipInfoToken', null, '',
@@ -193,7 +193,7 @@ class Plugin implements PluginInterface
         $form->addInput($pageSize);
         $form->addInput($isDrop);
         $form->addInput($writeType);
-        $form->addInput($isOversea);
+        $form->addInput($isPaid);
         $form->addInput($ipInfoToken);
         $form->addInput($socks5Host);
         $form->addInput($socks5Auth);
