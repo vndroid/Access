@@ -11,6 +11,7 @@ use Typecho\Widget\Helper\Form;
 use Typecho\Widget\Helper\Form\Element\Text;
 use Typecho\Widget\Helper\Form\Element\Radio;
 use Utils\Helper;
+use Widget\Notice;
 use Widget\Options;
 
 if (!defined('__TYPECHO_ROOT_DIR__')) {
@@ -148,6 +149,30 @@ class Plugin implements PluginInterface
      */
     public static function personalConfig(Form $form)
     {
+    }
+
+    /**
+     * 自定义配置处理，保存前校验 Redis 扩展
+     *
+     * @param array $settings 配置值
+     * @param bool $isInit 是否为初始化
+     * @return void
+     * @throws PluginException
+     */
+    public static function configHandle(array $settings, bool $isInit): void
+    {
+        if (!$isInit && isset($settings['enableRedis']) && $settings['enableRedis'] == '1') {
+            if (!extension_loaded('redis')) {
+                Notice::alloc()->set(_t('启用 Redis 缓存失败：PHP 未安装 redis 扩展，请先安装扩展后再启用'), 'error');
+                $referer = \Typecho\Request::getInstance()->getReferer();
+                \Typecho\Response::getInstance()
+                    ->setStatus(302)
+                    ->setHeader('Location', $referer ?: '/')
+                    ->respond();
+            }
+        }
+
+        \Widget\Plugins\Edit::configPlugin('Access', $settings);
     }
 
     /**
