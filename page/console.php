@@ -173,21 +173,21 @@ $access = new Core();
                         <tbody>
                             <tr>
                                 <td>今日</td>
-                                <td><?php echo $access->overview['today']['pv']['count'];?></td>
-                                <td><?php echo $access->overview['today']['uv']['count'];?></td>
-                                <td><?php echo $access->overview['today']['ip']['count'];?></td>
+                                <td id="ov-today-pv" class="access-skeleton">--</td>
+                                <td id="ov-today-uv" class="access-skeleton">--</td>
+                                <td id="ov-today-ip" class="access-skeleton">--</td>
                             </tr>
                             <tr>
                                 <td>昨日</td>
-                                <td><?php echo $access->overview['yesterday']['pv']['count'];?></td>
-                                <td><?php echo $access->overview['yesterday']['uv']['count'];?></td>
-                                <td><?php echo $access->overview['yesterday']['ip']['count'];?></td>
+                                <td id="ov-yesterday-pv" class="access-skeleton">--</td>
+                                <td id="ov-yesterday-uv" class="access-skeleton">--</td>
+                                <td id="ov-yesterday-ip" class="access-skeleton">--</td>
                             </tr>
                             <tr>
                                 <td>总计</td>
-                                <td><?php echo $access->overview['total']['pv'];?></td>
-                                <td><?php echo $access->overview['total']['uv'];?></td>
-                                <td><?php echo $access->overview['total']['ip'];?></td>
+                                <td id="ov-total-pv" class="access-skeleton">--</td>
+                                <td id="ov-total-uv" class="access-skeleton">--</td>
+                                <td id="ov-total-ip" class="access-skeleton">--</td>
                             </tr>
                         </tbody>
                     </table>
@@ -209,14 +209,8 @@ $access = new Core();
                                 <th>来源 DOMAIN</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            <?php foreach ($access->referer['domain'] as $key => $value):?>
-                            <tr>
-                                <td><?php echo $key +1 ?></td>
-                                <td><?php echo $value['count']?></td>
-                                <td><?php echo $value['value']?></td>
-                            </tr>
-                            <?php endforeach;?>
+                        <tbody id="referer-domain-body">
+                            <tr><td colspan="3" class="access-skeleton"><?php _e('加载中…'); ?></td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -237,25 +231,19 @@ $access = new Core();
                                 <th>来源 URL</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            <?php foreach ($access->referer['url'] as $key => $value):?>
-                            <tr>
-                                <td><?php echo $key +1 ?></td>
-                                <td><?php echo $value['count']?></td>
-                                <td><?php echo $value['value']?></td>
-                            </tr>
-                            <?php endforeach;?>
+                        <tbody id="referer-url-body">
+                            <tr><td colspan="3" class="access-skeleton"><?php _e('加载中…'); ?></td></tr>
                         </tbody>
                     </table>
                 </div>
                 <h4 class="typecho-list-table-title">今日图表</h4>
-                <div class="typecho-table-wrap" id="chart-today"></div>
+                <div class="typecho-table-wrap access-skeleton" id="chart-today" style="min-height:300px"></div>
 
                 <h4 class="typecho-list-table-title">昨日图表</h4>
-                <div class="typecho-table-wrap" id="chart-yesterday"></div>
+                <div class="typecho-table-wrap access-skeleton" id="chart-yesterday" style="min-height:300px"></div>
 
                 <h4 class="typecho-list-table-title">当月图表</h4>
-                <div class="typecho-table-wrap" id="chart-month"></div>
+                <div class="typecho-table-wrap access-skeleton" id="chart-month" style="min-height:300px"></div>
             </div><!-- end .typecho-list -->
             <?php endif;?>
         </div><!-- end .typecho-page-main -->
@@ -384,8 +372,7 @@ $(document).ready(function() {
 <script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.0.1/modules/exporting.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.0.1/modules/export-data.src.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script type="text/javascript">
-    chartData = <?php echo $access->overview['chart_data'] ?>;
-    printChart = function(target, data) {
+    var printChart = function(target, data) {
         target.highcharts({
             title: {text: data['title'], x: -20},
             subtitle: {text: data['sub_title'], x: -20},
@@ -399,13 +386,72 @@ $(document).ready(function() {
                 {name: 'IP（地址）',data: data['ip']['detail']}
             ]
         });
-    }
-    $(document).ready(function() {
-        printChart($('#chart-today'), chartData['today']);
-        printChart($('#chart-yesterday'), chartData['yesterday']);
-        printChart($('#chart-month'), chartData['month']);
-    });
+    };
 
+    function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+
+    $(document).ready(function() {
+        $.ajax({
+            url: '<?php echo rtrim(Helper::options()->index, '/') . '/access/overview.json'; ?>',
+            method: 'get',
+            dataType: 'json',
+            success: function(res) {
+                if (res.code !== 0) {
+                    $('.access-skeleton').text('加载失败');
+                    return;
+                }
+                var d = res.data;
+
+                // ── 数据总览表格 ──
+                $('#ov-today-pv').text(d.overview.today.pv.count).removeClass('access-skeleton');
+                $('#ov-today-uv').text(d.overview.today.uv.count).removeClass('access-skeleton');
+                $('#ov-today-ip').text(d.overview.today.ip.count).removeClass('access-skeleton');
+                $('#ov-yesterday-pv').text(d.overview.yesterday.pv.count).removeClass('access-skeleton');
+                $('#ov-yesterday-uv').text(d.overview.yesterday.uv.count).removeClass('access-skeleton');
+                $('#ov-yesterday-ip').text(d.overview.yesterday.ip.count).removeClass('access-skeleton');
+                $('#ov-total-pv').text(d.overview.total.pv).removeClass('access-skeleton');
+                $('#ov-total-uv').text(d.overview.total.uv).removeClass('access-skeleton');
+                $('#ov-total-ip').text(d.overview.total.ip).removeClass('access-skeleton');
+
+                // ── 来源域名 ──
+                var domainHtml = '';
+                if (d.referer.domain && d.referer.domain.length) {
+                    $.each(d.referer.domain, function(i, v) {
+                        domainHtml += '<tr><td>' + (i + 1) + '</td><td>' + escapeHtml(String(v.count)) + '</td><td>' + escapeHtml(String(v.value)) + '</td></tr>';
+                    });
+                } else {
+                    domainHtml = '<tr><td colspan="3">暂无数据</td></tr>';
+                }
+                $('#referer-domain-body').html(domainHtml);
+
+                // ── 来源 URL ──
+                var urlHtml = '';
+                if (d.referer.url && d.referer.url.length) {
+                    $.each(d.referer.url, function(i, v) {
+                        urlHtml += '<tr><td>' + (i + 1) + '</td><td>' + escapeHtml(String(v.count)) + '</td><td>' + escapeHtml(String(v.value)) + '</td></tr>';
+                    });
+                } else {
+                    urlHtml = '<tr><td colspan="3">暂无数据</td></tr>';
+                }
+                $('#referer-url-body').html(urlHtml);
+
+                // ── 图表 ──
+                $('#chart-today').removeClass('access-skeleton');
+                $('#chart-yesterday').removeClass('access-skeleton');
+                $('#chart-month').removeClass('access-skeleton');
+                printChart($('#chart-today'), d.chart_data['today']);
+                printChart($('#chart-yesterday'), d.chart_data['yesterday']);
+                printChart($('#chart-month'), d.chart_data['month']);
+            },
+            error: function() {
+                $('.access-skeleton').text('加载失败');
+            }
+        });
+    });
 </script>
 <?php endif;?>
 <?php

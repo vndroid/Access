@@ -64,8 +64,6 @@ class Core
             case 'overview':
                 $this->action = 'overview';
                 $this->title = _t('访问概览');
-                $this->parseOverview();
-                $this->parseReferer();
                 break;
             case 'logs':
             default:
@@ -74,6 +72,28 @@ class Core
                 $this->parseLogs();
                 break;
         }
+    }
+
+    /**
+     * 获取概览页全部数据（供 AJAX 接口调用）
+     *
+     * @access public
+     * @return array
+     */
+    public function getOverviewData(): array
+    {
+        $this->parseOverview();
+        $this->parseReferer();
+
+        return [
+            'overview' => [
+                'today'     => $this->overview['today'],
+                'yesterday' => $this->overview['yesterday'],
+                'total'     => $this->overview['total'],
+            ],
+            'referer'    => $this->referer,
+            'chart_data' => json_decode($this->overview['chart_data'], true),
+        ];
     }
 
     /**
