@@ -35,7 +35,6 @@ $initAction = $access->action;
                     <ul class="typecho-option-tabs" id="access-tabs">
                         <li data-tab="overview"<?=($initAction == 'overview' ? ' class="current"' : '')?>><a href="#"><?php _e('访问概览'); ?></a></li>
                         <li data-tab="logs"<?=($initAction == 'logs' ? ' class="current"' : '')?>><a href="#"><?php _e('访问日志'); ?></a></li>
-                        <li><a href="<?php $options->adminUrl('options-plugin.php?config=Access') ?>"><?php _e('插件设置'); ?></a></li>
                     </ul>
                 </div>
 
