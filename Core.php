@@ -2,6 +2,7 @@
 
 namespace TypechoPlugin\Access;
 
+use Redis;
 use Typecho\Cookie;
 use Typecho\Db;
 use Typecho\I18n;
@@ -21,6 +22,12 @@ class Core
     protected Db $db;
     protected Request $request;
     protected Response $response;
+
+    /** Redis 缓存实例，未启用时为 null */
+    protected ?Redis $redis = null;
+
+    /** Redis 缓存键前缀 */
+    private const CACHE_PREFIX = 'typecho_access:';
 
     public UA $ua;
     public $config;
@@ -52,6 +59,7 @@ class Core
             throw new PluginException(_t('请先设置插件！'));
         }
         $this->ua = new UA($this->request->getAgent());
+        $this->initRedis();
         switch ($this->request->get('action')) {
             case 'overview':
                 $this->action = 'overview';
@@ -172,13 +180,110 @@ class Core
     }
 
     /**
+     * 初始化 Redis 连接
+     *
+     * @access protected
+     * @return void
+     */
+    protected function initRedis(): void
+    {
+        if (!extension_loaded('redis')) {
+            return;
+        }
+
+        if (!isset($this->config->enableRedis) || $this->config->enableRedis != '1') {
+            return;
+        }
+
+        try {
+            $redis = new Redis();
+            $host = $this->config->redisHost ?: '127.0.0.1';
+            $port = (int)($this->config->redisPort ?: 6379);
+
+            if (!$redis->connect($host, $port, 3)) {
+                return;
+            }
+
+            $password = $this->config->redisPassword ?? '';
+            if ($password !== '') {
+                $redis->auth($password);
+            }
+
+            $redis->ping();
+            $this->redis = $redis;
+        } catch (\Exception $e) {
+            $this->redis = null;
+        }
+    }
+
+    /**
+     * 从 Redis 获取缓存数据
+     *
+     * @access protected
+     * @param string $key 缓存键名
+     * @return array|null 缓存数据，未命中返回 null
+     */
+    protected function getCache(string $key): ?array
+    {
+        if ($this->redis === null) {
+            return null;
+        }
+
+        try {
+            $data = $this->redis->get(self::CACHE_PREFIX . $key);
+            if ($data === false) {
+                return null;
+            }
+            $decoded = json_decode($data, true);
+            return is_array($decoded) ? $decoded : null;
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    /**
+     * 写入 Redis 缓存
+     *
+     * @access protected
+     * @param string $key 缓存键名
+     * @param array $data 缓存数据
+     * @return void
+     */
+    protected function setCache(string $key, array $data): void
+    {
+        if ($this->redis === null) {
+            return;
+        }
+
+        try {
+            $ttl = (int)($this->config->redisTtl ?: 300);
+            $this->redis->setex(
+                self::CACHE_PREFIX . $key,
+                $ttl,
+                json_encode($data, JSON_UNESCAPED_UNICODE)
+            );
+        } catch (\Exception $e) {
+            // 写入失败静默忽略，不影响主流程
+        }
+    }
+
+    /**
      * 生成来源统计数据，提供给页面渲染使用
+     * 优先从 Redis 缓存读取，缓存未命中时查询数据库并回填缓存
      *
      * @access protected
      * @return void
      */
     protected function parseReferer()
     {
+        // 尝试从 Redis 缓存读取
+        $cached = $this->getCache('referer');
+        if ($cached !== null) {
+            $this->referer = $cached;
+            return;
+        }
+
+        // 缓存未命中，从数据库查询
         $this->referer['url'] = $this->db->fetchAll($this->db->select('DISTINCT entrypoint AS value, COUNT(1) as count')
                 ->from('table.access')->where("entrypoint <> ''")->group('entrypoint')
                 ->order('count', Db::SORT_DESC)->limit($this->config->pageSize));
@@ -186,6 +291,9 @@ class Core
                 ->from('table.access')->where("entrypoint_domain <> ''")->group('entrypoint_domain')
                 ->order('count', Db::SORT_DESC)->limit($this->config->pageSize));
         $this->referer = $this->htmlEncode($this->urlDecode($this->referer));
+
+        // 写入 Redis 缓存
+        $this->setCache('referer', $this->referer);
     }
 
     /**
