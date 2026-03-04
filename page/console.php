@@ -58,10 +58,10 @@ $access = new Core();
                         <?php endif; ?>
                         <label>
                             <select name="filter">
-                                <option <?php if($request->filter == 'all'): ?> selected="true" <?php endif; ?>value="all"><?php _e('全部条件'); ?></option>
-                                <option <?php if($request->filter == 'ip'): ?> selected="true" <?php endif; ?>value="ip"><?php _e('按IP'); ?></option>
-                                <option <?php if($request->filter == 'post'): ?> selected="true" <?php endif; ?>value="post"><?php _e('按文章'); ?></option>
-                                <option <?php if($request->filter == 'path'): ?> selected="true" <?php endif; ?>value="path"><?php _e('按路由'); ?></option>
+                                <option <?php if($request->filter == 'all'): ?> selected <?php endif; ?>value="all"><?php _e('全部条件'); ?></option>
+                                <option <?php if($request->filter == 'ip'): ?> selected <?php endif; ?>value="ip"><?php _e('按IP'); ?></option>
+                                <option <?php if($request->filter == 'post'): ?> selected <?php endif; ?>value="post"><?php _e('按文章'); ?></option>
+                                <option <?php if($request->filter == 'path'): ?> selected <?php endif; ?>value="path"><?php _e('按路由'); ?></option>
                             </select>
                         </label>
                         <label style="<?php if($request->get('filter', 'all') != 'ip'): ?>display: none<?php endif; ?>">
@@ -70,7 +70,7 @@ $access = new Core();
                         <label style="<?php if($request->get('filter', 'all') != 'post'): ?>display: none<?php endif; ?>">
                             <select name="cid">
                                 <?php foreach ($access->logs['cidList'] as $content):?>
-                                    <option <?php if($request->cid == $content['cid']): ?> selected="true" <?php endif; ?>value="<?php echo $content['cid'];?>"><?php echo $content['title'];?> (<?php echo $content['count'];?>)</option>
+                                    <option <?php if($request->cid == $content['cid']): ?> selected <?php endif; ?>value="<?php echo $content['cid'];?>"><?php echo $content['title'];?> (<?php echo $content['count'];?>)</option>
                                 <?php endforeach;?>
                             </select>
                         </label>
@@ -79,9 +79,9 @@ $access = new Core();
                         </label>
                         <label>
                             <select name="type">
-                                <option <?php if($request->type == 1): ?> selected="true" <?php endif; ?>value="1"><?php _e('默认（仅人类）'); ?></option>
-                                <option <?php if($request->type == 2): ?> selected="true" <?php endif; ?>value="2"><?php _e('筛选（仅爬虫）'); ?></option>
-                                <option <?php if($request->type == 3): ?> selected="true" <?php endif; ?>value="3"><?php _e('所有'); ?></option>
+                                <option <?php if($request->type == 1): ?> selected <?php endif; ?>value="1"><?php _e('默认（仅人类）'); ?></option>
+                                <option <?php if($request->type == 2): ?> selected <?php endif; ?>value="2"><?php _e('筛选（仅爬虫）'); ?></option>
+                                <option <?php if($request->type == 3): ?> selected <?php endif; ?>value="3"><?php _e('所有'); ?></option>
                             </select>
                         </label>
                         <input type="hidden" name="page" value="1">
