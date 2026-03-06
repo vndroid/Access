@@ -26,7 +26,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.0.0
+ * @version 3.0.1
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
