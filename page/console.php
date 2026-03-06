@@ -36,6 +36,9 @@ $initAction = $access->action;
                         <li data-tab="overview"<?=($initAction == 'overview' ? ' class="current"' : '')?>><a href="#"><?php _e('访问概览'); ?></a></li>
                         <li data-tab="logs"<?=($initAction == 'logs' ? ' class="current"' : '')?>><a href="#"><?php _e('访问日志'); ?></a></li>
                     </ul>
+                    <ul class="typecho-option-tabs" id="access-refresh">
+                        <li data-tab="refresh"><a href="#"><?php _e('刷新'); ?></a></li>
+                    </ul>
                 </div>
 
                 <!-- ========== 日志面板 ========== -->
@@ -469,8 +472,28 @@ include 'table-js.php';
     /* ==================== DOM Ready ==================== */
     $(document).ready(function() {
 
-        // Tab 点击
+        // 标签切换
         $('#access-tabs li[data-tab]').on('click', function(e) { e.preventDefault(); switchTab($(this).data('tab')); });
+
+        // 刷新按钮
+        $('#access-refresh li[data-tab="refresh"]').on('click', function(e) {
+            e.preventDefault();
+            if (currentTab === 'overview') {
+                overviewLoaded = false;
+                // 重置概览面板骨架屏
+                $('#panel-overview .access-skeleton').addBack('.access-skeleton').each(function() {
+                    $(this).addClass('access-skeleton');
+                });
+                $('#ov-today-pv, #ov-today-uv, #ov-today-ip, #ov-yesterday-pv, #ov-yesterday-uv, #ov-yesterday-ip, #ov-total-pv, #ov-total-uv, #ov-total-ip').text('--').addClass('access-skeleton');
+                $('#referer-domain-body').html('<tr><td colspan="3" class="access-skeleton">加载中…</td></tr>');
+                $('#referer-url-body').html('<tr><td colspan="3" class="access-skeleton">加载中…</td></tr>');
+                $('#chart-today, #chart-yesterday, #chart-month').empty().addClass('access-skeleton');
+                loadOverview();
+            } else if (currentTab === 'logs') {
+                logsLoaded = false;
+                loadLogs(logsState);
+            }
+        });
 
         // 初始加载
         if (initAction === 'overview') { loadOverview(); } else { loadLogs(logsState); }
