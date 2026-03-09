@@ -230,40 +230,40 @@ include 'common-js.php';
 include 'table-js.php';
 ?>
 <script src="<?php $options->pluginUrl('Access/sweetalert/sweetalert.min.js')?>"></script>
-<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.0.1/highcharts.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.0.1/modules/series-label.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.0.1/modules/exporting.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.0.1/modules/export-data.src.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.3.0/highcharts.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.3.0/modules/series-label.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.3.0/modules/exporting.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.3.0/modules/export-data.src.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script type="text/javascript">
 (function() {
     /* ==================== 常量 ==================== */
-    var logsApiUrl     = '<?php echo rtrim(Helper::options()->index, '/') . '/access/logs/get.json'; ?>';
-    var overviewApiUrl = '<?php echo rtrim(Helper::options()->index, '/') . '/access/overview.json'; ?>';
-    var ipApiUrl       = '<?php echo rtrim(Helper::options()->index, '/') . '/access/geo.json'; ?>';
-    var deleteApiUrl   = '<?php echo rtrim(Helper::options()->index, '/') . '/access/logs/delete.json'; ?>';
-    var adminUrl       = '<?php echo rtrim(Helper::options()->adminUrl, '/'); ?>';
-    var panelName      = '<?php echo AccessPlugin::$panel; ?>';
-    var initAction     = '<?php echo $initAction; ?>';
+    let logsApiUrl     = '<?php echo rtrim(Helper::options()->index, '/') . '/access/logs/get.json'; ?>';
+    let overviewApiUrl = '<?php echo rtrim(Helper::options()->index, '/') . '/access/overview.json'; ?>';
+    let ipApiUrl       = '<?php echo rtrim(Helper::options()->index, '/') . '/access/geo.json'; ?>';
+    let deleteApiUrl   = '<?php echo rtrim(Helper::options()->index, '/') . '/access/logs/delete.json'; ?>';
+    let adminUrl       = '<?php echo rtrim(Helper::options()->adminUrl, '/'); ?>';
+    let panelName      = '<?php echo AccessPlugin::$panel; ?>';
+    let initAction     = '<?php echo $initAction; ?>';
 
     /* ==================== 工具函数 ==================== */
     function escapeHtml(str) {
-        var div = document.createElement('div');
+        let div = document.createElement('div');
         div.appendChild(document.createTextNode(str));
         return div.innerHTML;
     }
 
     function formatDate(ts) {
-        var d = new Date(ts * 1000);
-        var pad = function(n) { return n < 10 ? '0' + n : n; };
+        let d = new Date(ts * 1000);
+        let pad = function(n) { return n < 10 ? '0' + n : n; };
         return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
              + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
     }
 
     /* ==================== Tab 切换状态 ==================== */
-    var currentTab = initAction;
-    var overviewLoaded = false;
-    var logsLoaded = false;
-    var logsState = { page: 1, type: 1, filter: 'all', ip: '', cid: '', path: '' };
+    let currentTab = initAction;
+    let overviewLoaded = false;
+    let logsLoaded = false;
+    let logsState = { page: 1, type: 1, filter: 'all', ip: '', cid: '', path: '' };
 
     function buildTabUrl(tab) {
         return adminUrl + '/extending.php?panel=' + encodeURIComponent(panelName) + '&action=' + tab;
@@ -287,7 +287,7 @@ include 'table-js.php';
     }
 
     $(window).on('popstate', function(e) {
-        var state = e.originalEvent.state;
+        let state = e.originalEvent.state;
         if (state && state.tab) {
             currentTab = ''; // 强制 switchTab 执行
             switchTab(state.tab);
@@ -295,7 +295,7 @@ include 'table-js.php';
     });
 
     /* ==================== 概览加载 ==================== */
-    var printChart = function($el, data) {
+    let printChart = function($el, data) {
         $el.highcharts({
             title:   { text: data.title, x: -20 },
             subtitle:{ text: data.sub_title, x: -20 },
@@ -460,10 +460,10 @@ include 'table-js.php';
                 data: { ip: $(this).data('ip') },
                 success: function(data) {
                     if (data.code === 0) {
-                        swal({ title: 'IP 查询成功', text: data.data.country + ' ' + data.data.regionName + ' ' + data.data.city, icon: 'success' });
+                        swal({ title: 'IP 查询成功', text: data.data.country + ' ' + data.data.region + ' ' + data.data.city, icon: 'success' });
                     } else { swal('IP 查询失败', data.data, 'warning'); }
                 },
-                error: function() { swal('IP查询失败', '网络异常或 PHP 环境配置异常', 'error'); }
+                error: function() { swal('IP 查询失败', '网络异常或 PHP 环境配置异常', 'error'); }
             });
             return false;
         });
