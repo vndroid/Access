@@ -2,6 +2,7 @@
 
 namespace TypechoPlugin\Access;
 
+use Typecho\Plugin\Exception;
 use Widget\Options;
 
 if (!defined('__TYPECHO_ROOT_DIR__')) {
@@ -15,12 +16,16 @@ class Ip
 {
     private static array $cached = [];
 
+    /**
+     * @throws Exception
+     */
     public static function find(string $ip): array
     {
         if (empty($ip)) {
             return [
                 "status" => "failure",
                 "country" => null,
+                "region" => null,
                 "city" => null,
             ];
         }
@@ -32,6 +37,7 @@ class Ip
             return [
                 "status" => "failure",
                 "country" => null,
+                "region" => null,
                 "city" => null,
             ];
         }
@@ -62,7 +68,31 @@ class Ip
     }
 
     /**
+     * ISO 3166-1 alpha-2 国家码转国家名（简体中文）
+     *
+     * @param string $code 两位国家码，如 "AU"
+     * @return string 国家或地区中文名，如 "澳大利亚"
+     */
+    public static function iso2zh(string $code): string
+    {
+        if (!preg_match('/^[A-Za-z]{2}$/', $code)) {
+            return '未知';
+        }
+
+        $zhName = \Locale::getDisplayRegion('-' . strtoupper($code), 'zh_CN');
+
+        // 超过 10 个字符时截断
+        if (mb_strlen($zhName, 'UTF-8') > 10) {
+            $zhName = mb_substr($zhName, 0, 10, 'UTF-8');
+        }
+
+        return $zhName;
+    }
+
+    /**
      * 通过 IPinfo Core 接口查询地址详情
+     *
+     * @throws Exception
      */
     private static function queryIpInfoCore(string $ip, string $token): array
     {
@@ -87,27 +117,30 @@ class Ip
         curl_close($ch);
 
         if ($body === false) {
-            return ['status' => 'failure', 'error' => 'cURL 请求失败', 'country' => null, 'city' => null];
+            return ['status' => 'failure', 'error' => 'cURL 请求失败', 'country' => null, 'region' => null, 'city' => null];
         }
 
         if ($httpCode !== 200) {
             $err = json_decode($body, true);
             $msg = $err['error'] ?? ('HTTP ' . $httpCode);
-            return ['status' => 'failure', 'error' => $msg, 'country' => null, 'city' => null];
+            return ['status' => 'failure', 'error' => $msg, 'country' => null, 'region' => null, 'city' => null];
         }
 
         $json = json_decode($body, true);
         if (!is_array($json) || empty($json['ip'])) {
-            return ['status' => 'failure', 'error' => '响应数据异常', 'country' => null, 'city' => null];
+            return ['status' => 'failure', 'error' => '响应数据异常', 'country' => '', 'region' => '', 'city' => ''];
+        }
+        if ($json['bogon'] === true) {
+            return ['status' => 'success', 'error' => '保留地址区段', 'country' => '', 'region' => '', 'city' => ''];
         }
 
         return [
             'status'      => 'success',
             'ip'          => $json['ip'],
-            'country'     => $json['geo']['country'] ?? '',
+            'country'     => self::iso2zh($json['country_code']) ?? '',
             'countryCode' => $json['geo']['country_code'] ?? '',
-            'region'      => $json['geo']['region_code'] ?? '',
-            'regionName'  => $json['geo']['region'] ?? '',
+            'region'      => $json['geo']['region'] ?? '',
+            'regionCode'  => $json['geo']['region_code'] ?? '',
             'city'        => $json['geo']['city'] ?? '',
             'zip'         => $json['geo']['postal_code'] ?? '',
             'timezone'    => $json['geo']['timezone'] ?? '',
@@ -120,6 +153,7 @@ class Ip
 
     /**
      * 通过 IPinfo Lite 接口查询（免费版）
+     * @throws Exception
      */
     private static function queryIpInfoLite(string $ip, string $token): array
     {
@@ -144,27 +178,30 @@ class Ip
         curl_close($ch);
 
         if ($body === false) {
-            return ['status' => 'failure', 'error' => 'cURL 请求失败', 'country' => null, 'city' => null];
+            return ['status' => 'failure', 'error' => 'cURL 请求失败', 'country' => null, 'region' => null, 'city' => null];
         }
 
         if ($httpCode !== 200) {
             $err = json_decode($body, true);
             $msg = $err['error'] ?? ('HTTP ' . $httpCode);
-            return ['status' => 'failure', 'error' => $msg, 'country' => null, 'city' => null];
+            return ['status' => 'failure', 'error' => $msg, 'country' => null, 'region' => null, 'city' => null];
         }
 
         $json = json_decode($body, true);
         if (!is_array($json) || empty($json['ip'])) {
-            return ['status' => 'failure', 'error' => '响应数据异常', 'country' => null, 'city' => null];
+            return ['status' => 'failure', 'error' => '响应数据异常', 'country' => '', 'region' => '', 'city' => ''];
+        }
+        if ($json['bogon'] === true) {
+            return ['status' => 'success', 'error' => '保留地址区段', 'country' => '', 'region' => '', 'city' => ''];
         }
 
         return [
             'status'      => 'success',
             'ip'          => $json['ip'],
-            'country'     => $json['country'] ?? '',
+            'country'     => self::iso2zh($json['country_code']) ?? '',
             'countryCode' => $json['country_code'] ?? '',
             'region'      => '',
-            'regionName'  => '',
+            'regionCode'  => '',
             'city'        => '',
             'zip'         => '',
             'timezone'    => '',
@@ -216,8 +253,8 @@ class Ip
             'ip'          => $geo['ip'] ?? $ip,
             'country'     => $geo['country_name'] ?? '',
             'countryCode' => $geo['country_code'] ?? '',
-            'region'      => $geo['region_code'] ?? '',
-            'regionName'  => $geo['region_name'] ?? '',
+            'region'      => $geo['region_name'] ?? '',
+            'regionCode'  => $geo['region_code'] ?? '',
             'city'        => $geo['city'] ?? '',
             'zip'         => $geo['postal_code'] ?? '',
             'timezone'    => $geo['timezone'] ?? '',

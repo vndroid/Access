@@ -48,20 +48,32 @@ class Action extends Widget implements ActionInterface
         try {
             $result = Ip::find($ip);
             if ($result['status'] === 'success') {
-                $response = [
-                    'code' => 0,
-                    'data' => $result,
-                ];
+                if ($result['country'] == '' && $result['region'] == '' && $result['city'] == '' && $result['error'] !== '') {
+                    $response = [
+                        'code' => 0,
+                        'data' => $result,
+                        'msg' => $result['error'],
+                    ];
+                } else {
+                    $response = [
+                        'code' => 0,
+                        'data' => $result,
+                        'msg' => $result['error'],
+                    ];
+                }
+
             } else {
                 $response = [
                     'code' => 500,
-                    'data' => $result['error'] ?? 'IP 查询失败',
+                    'data' => $result['error'] ?? '查询失败',
+                    'msg' => '查询失败',
                 ];
             }
         } catch (\Exception $e) {
             $response = [
                 'code' => 500,
-                'data' => 'IP 查询异常：' . $e->getMessage(),
+                'data' => $e->getMessage(),
+                'msg' => '查询异常',
             ];
         }
 
