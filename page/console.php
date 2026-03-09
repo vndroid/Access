@@ -460,7 +460,12 @@ include 'table-js.php';
                 data: { ip: $(this).data('ip') },
                 success: function(data) {
                     if (data.code === 0) {
-                        swal({ title: 'IP 查询成功', text: data.data.country + ' ' + data.data.region + ' ' + data.data.city, icon: 'success' });
+                        var location = [data.data.country, data.data.region, data.data.city].filter(Boolean).join(' ');
+                        if (location === '') {
+                            swal({ title: 'IP 查询成功', text: data.msg || '暂无该 IP 的地理位置信息', icon: 'success' });
+                        } else {
+                            swal({ title: 'IP 查询成功', text: location, icon: 'success' });
+                        }
                     } else { swal('IP 查询失败', data.data, 'warning'); }
                 },
                 error: function() { swal('IP 查询失败', '网络异常或 PHP 环境配置异常', 'error'); }
