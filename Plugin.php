@@ -43,7 +43,10 @@ class Plugin implements PluginInterface
     public static function activate(): string
     {
         if (!extension_loaded('curl')) {
-            throw new PluginException('需要 PHP 环境支持 cURL 扩展');
+            throw new PluginException(_t('检测到当前 PHP 环境缺失 cURL 扩展'));
+        }
+        if (!extension_loaded('intl')) {
+            throw new PluginException(_t('检测到当前 PHP 环境缺失 intl 扩展'));
         }
         $msg = self::install();
         Helper::addPanel(1, self::$panel, _t('访问统计'), _t('统计控制台'), 'subscriber');
