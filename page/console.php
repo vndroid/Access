@@ -385,18 +385,17 @@ include 'table-js.php';
                 }
 
                 // 表格
-                var html = '';
+                let html = '';
                 if (d.list && d.list.length) {
                     $.each(d.list, function(i, log) {
-                        var decodedUrl = log.url;
+                        let decodedUrl = log.url;
                         try { decodedUrl = decodeURIComponent(log.url.replace(/%23/g, '#')); } catch(e) {}
-                        var ip = log.ip_display || log.ip;
-
+                        let ip = log.ip_display || log.ip;
                         html += '<tr data-id="' + log.id + '">';
                         html += '<td><label><input type="checkbox" data-id="' + log.id + '" value="' + log.id + '" name="id[]"/></label></td>';
                         html += '<td><a href="#" class="logs-filter-link" data-filter="path" data-value="' + escapeHtml(String(log.path)) + '">' + escapeHtml(decodedUrl) + '</a></td>';
-                        html += '<td><a data-action="ua" href="#" title="' + escapeHtml(String(log.ua)) + '">' + escapeHtml(String(log.display_name)) + '</a></td>';
-                        html += '<td><a data-action="ip" data-ip="' + escapeHtml(String(ip)) + '" href="#">' + escapeHtml(String(ip)) + '</a>';
+                        html += '<td><a href="#" data-action="ua" title="' + escapeHtml(String(log.ua)) + '">' + escapeHtml(String(log.display_name)) + '</a></td>';
+                        html += '<td><a href="#" data-action="ip" data-ip="' + escapeHtml(String(ip)) + '">' + escapeHtml(String(ip)) + '</a>';
                         if (state.filter !== 'ip') {
                             html += ' <a href="#" class="logs-filter-link" data-filter="ip" data-value="' + escapeHtml(String(ip)) + '">[ ? ]</a>';
                         }
