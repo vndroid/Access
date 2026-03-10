@@ -22,7 +22,7 @@ use Widget\User;
 $access = new Core();
 $initAction = $access->action;
 ?>
-<link rel="stylesheet" href="<?php $options->pluginUrl('Access/css/style.css?v=3.0.0')?>">
+<link rel="stylesheet" href="<?php $options->pluginUrl('Access/css/style.css?v=3.0.1')?>">
 <link rel="stylesheet" href="<?php $options->pluginUrl('Access/sweetalert/sweetalert.css')?>">
 <main class="main">
     <div class="body container">
@@ -88,12 +88,12 @@ $initAction = $access->action;
                     <div class="typecho-table-wrap">
                         <table class="typecho-list-table">
                             <colgroup>
-                                <col width="5%"/>
-                                <col width="20%"/>
-                                <col width="25%"/>
+                                <col width="3%"/>
+                                <col width="21%"/>
                                 <col width="18%"/>
-                                <col width="20%"/>
                                 <col width="15%"/>
+                                <col width="20%"/>
+                                <col width="14%"/>
                             </colgroup>
                             <thead>
                             <tr>
@@ -132,10 +132,10 @@ $initAction = $access->action;
                 <div class="typecho-table-wrap">
                     <table class="typecho-list-table">
                         <colgroup>
-                            <col width="10%"/>
-                            <col width="30%"/>
-                            <col width="25%"/>
-                            <col width=""/>
+                            <col width="4%"/>
+                            <col width="20%"/>
+                            <col width="20%"/>
+                            <col width="20%"/>
                         </colgroup>
                         <thead>
                             <tr>
@@ -172,8 +172,8 @@ $initAction = $access->action;
                 <div class="typecho-table-wrap">
                     <table class="typecho-list-table">
                         <colgroup>
-                            <col width="10%"/>
-                            <col width="10%"/>
+                            <col width="5%"/>
+                            <col width="15%"/>
                             <col width="80%"/>
                         </colgroup>
                         <thead>
@@ -193,8 +193,8 @@ $initAction = $access->action;
                 <div class="typecho-table-wrap">
                     <table class="typecho-list-table">
                         <colgroup>
-                            <col width="10%"/>
-                            <col width="10%"/>
+                            <col width="5%"/>
+                            <col width="15%"/>
                             <col width="80%"/>
                         </colgroup>
                         <thead>
