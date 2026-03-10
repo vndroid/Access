@@ -27,3 +27,12 @@ div form.search-form {
 .logs-filter-link.right-aligned {
     float: right;
 }
+
+.typecho-list-table.mono-table {
+    font-family: "Consolas", "Menlo", "Monaco", "Courier New", monospace;
+}
+
+.typecho-list-table.mono-table.small-font {
+    font-family: "Consolas", "Menlo", "Monaco", "Courier New", monospace;
+    font-size: 12px;
+}

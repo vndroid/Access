@@ -86,7 +86,7 @@ $initAction = $access->action;
                 </form>
                 <form class="operate-form" method="post">
                     <div class="typecho-table-wrap">
-                        <table class="typecho-list-table">
+                        <table class="typecho-list-table mono-table small-font">
                             <colgroup>
                                 <col width="3%"/>
                                 <col width="21%"/>
@@ -130,12 +130,12 @@ $initAction = $access->action;
 
                <h4 class="typecho-list-table-title">访问数据总览</h4>
                 <div class="typecho-table-wrap">
-                    <table class="typecho-list-table">
+                    <table class="typecho-list-table mono-table">
                         <colgroup>
-                            <col width="4%"/>
-                            <col width="20%"/>
-                            <col width="20%"/>
-                            <col width="20%"/>
+                            <col width="9%"/>
+                            <col width="15%"/>
+                            <col width="15%"/>
+                            <col width="15%"/>
                         </colgroup>
                         <thead>
                             <tr>
@@ -147,19 +147,19 @@ $initAction = $access->action;
                         </thead>
                         <tbody>
                             <tr>
-                                <td>今日</td>
+                                <td>Today</td>
                                 <td id="ov-today-pv" class="access-skeleton">--</td>
                                 <td id="ov-today-uv" class="access-skeleton">--</td>
                                 <td id="ov-today-ip" class="access-skeleton">--</td>
                             </tr>
                             <tr>
-                                <td>昨日</td>
+                                <td>Yesterday</td>
                                 <td id="ov-yesterday-pv" class="access-skeleton">--</td>
                                 <td id="ov-yesterday-uv" class="access-skeleton">--</td>
                                 <td id="ov-yesterday-ip" class="access-skeleton">--</td>
                             </tr>
                             <tr>
-                                <td>总计</td>
+                                <td>Total</td>
                                 <td id="ov-total-pv" class="access-skeleton">--</td>
                                 <td id="ov-total-uv" class="access-skeleton">--</td>
                                 <td id="ov-total-ip" class="access-skeleton">--</td>
@@ -170,17 +170,17 @@ $initAction = $access->action;
 
                <h4 class="typecho-list-table-title">来源域名 Top 20</h4>
                 <div class="typecho-table-wrap">
-                    <table class="typecho-list-table">
+                    <table class="typecho-list-table mono-table">
                         <colgroup>
-                            <col width="5%"/>
+                            <col width="10%"/>
                             <col width="15%"/>
-                            <col width="80%"/>
+                            <col width="75%"/>
                         </colgroup>
                         <thead>
                             <tr>
-                                <th>排名</th>
-                                <th>次数</th>
-                                <th>来源 DOMAIN</th>
+                                <th>Rank</th>
+                                <th>Occurrences</th>
+                                <th>Referrer Domain</th>
                             </tr>
                         </thead>
                         <tbody id="referer-domain-body">
@@ -191,17 +191,17 @@ $initAction = $access->action;
 
                <h4 class="typecho-list-table-title">来源页面 Top 20</h4>
                 <div class="typecho-table-wrap">
-                    <table class="typecho-list-table">
+                    <table class="typecho-list-table mono-table">
                         <colgroup>
-                            <col width="5%"/>
+                            <col width="10%"/>
                             <col width="15%"/>
-                            <col width="80%"/>
+                            <col width="75%"/>
                         </colgroup>
                         <thead>
                             <tr>
-                                <th>排名</th>
-                                <th>次数</th>
-                                <th>来源 URL</th>
+                                <th>Rank</th>
+                                <th>Occurrences</th>
+                                <th>Referrer URL</th>
                             </tr>
                         </thead>
                         <tbody id="referer-url-body">
@@ -397,7 +397,7 @@ include 'table-js.php';
                         html += '<td><a href="#" data-action="ua" title="' + escapeHtml(String(log.ua)) + '">' + escapeHtml(String(log.display_name)) + '</a></td>';
                         html += '<td><a href="#" data-action="ip" data-ip="' + escapeHtml(String(ip)) + '">' + escapeHtml(String(ip)) + '</a>';
                         if (state.filter !== 'ip') {
-                            html += ' <a href="#" class="logs-filter-link right-aligned" data-filter="ip" data-value="' + escapeHtml(String(ip)) + '">[ ? ]</a>';
+                            html += ' <a href="#" class="logs-filter-link right-aligned" data-filter="ip" data-value="' + escapeHtml(String(ip)) + '">[?]</a>';
                         }
                         html += '</td>';
                         html += '<td><a target="_blank" href="' + escapeHtml(String(log.referer)) + '">' + escapeHtml(String(log.referer)) + '</a></td>';
@@ -563,4 +563,3 @@ include 'table-js.php';
 })();
 </script>
 <?php include 'footer.php'; ?>
-
