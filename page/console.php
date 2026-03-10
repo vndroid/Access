@@ -397,7 +397,7 @@ include 'table-js.php';
                         html += '<td><a href="#" data-action="ua" title="' + escapeHtml(String(log.ua)) + '">' + escapeHtml(String(log.display_name)) + '</a></td>';
                         html += '<td><a href="#" data-action="ip" data-ip="' + escapeHtml(String(ip)) + '">' + escapeHtml(String(ip)) + '</a>';
                         if (state.filter !== 'ip') {
-                            html += ' <a href="#" class="logs-filter-link" data-filter="ip" data-value="' + escapeHtml(String(ip)) + '">[ ? ]</a>';
+                            html += ' <a href="#" class="logs-filter-link right-aligned" data-filter="ip" data-value="' + escapeHtml(String(ip)) + '">[ ? ]</a>';
                         }
                         html += '</td>';
                         html += '<td><a target="_blank" href="' + escapeHtml(String(log.referer)) + '">' + escapeHtml(String(log.referer)) + '</a></td>';

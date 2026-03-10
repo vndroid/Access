@@ -23,3 +23,13 @@ div form.search-form {
         background-position: -200% 0;
     }
 }
+
+.logs-filter-link.right-aligned {
+    float: right;
+}
+
+td::after {
+    content: '';
+    display: block;
+    clear: both;
+}
