@@ -1,4 +1,4 @@
-CREATE TABLE `typecho_access_log` (
+CREATE TABLE `typecho_access` (
   `id`                INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
   `ua`                varchar(255)     default ''  ,
   `browser_id`        varchar(32)      default ''  ,

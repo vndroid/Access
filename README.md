@@ -26,6 +26,11 @@ Record typecho system access logs and analytics.
 - Support Frontend or Backend write log.
 - Log filter supports filtering by ip, article title, and route
 
+### Todo
+
+- IPv6 Support
+- New IPDB Support
+
 ### Author
 
 [@kokororin](https://github.com/kokororin)

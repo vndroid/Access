@@ -45,7 +45,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
         $config = Typecho_Widget::widget('Widget_Options')->plugin('Access');
         if ($config->isDrop == 0) {
             $db = Typecho_Db::get();
-            $db->query("DROP TABLE `{$db->getPrefix()}access_log`", Typecho_Db::WRITE);
+            $db->query("DROP TABLE `{$db->getPrefix()}access`", Typecho_Db::WRITE);
         }
         Helper::removePanel(1, self::$panel);
         Helper::removeRoute("access_track_gif");
@@ -114,7 +114,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
             try {
                 $configLink = '<a href="' . Helper::options()->adminUrl . 'options-plugin.php?config=Access">' . _t('前往设置') . '</a>';
                 # 初始化数据库如果不存在
-                if (!$db->fetchRow($db->query("SHOW TABLES LIKE '{$prefix}access_log';", Typecho_Db::READ))) {
+                if (!$db->fetchRow($db->query("SHOW TABLES LIKE '{$prefix}access';", Typecho_Db::READ))) {
                     foreach ($scripts as $script) {
                         $script = trim($script);
                         if ($script) {
@@ -144,7 +144,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
                         $row['robot_version'    ] = $ua->getRobotVersion();
                         unset($row['date']);
                         try {
-                            $db->query($db->insert('table.access_log')->rows($row));
+                            $db->query($db->insert('table.access')->rows($row));
                         } catch (Typecho_Db_Exception $e) {
                             if ($e->getCode() != 23000)
                                 throw new Typecho_Plugin_Exception(_t('导入旧版数据失败，插件启用失败，错误信息：%s。', $e->getMessage()));
@@ -167,7 +167,7 @@ class Access_Plugin implements Typecho_Plugin_Interface
             try {
                 $configLink = '<a href="' . Helper::options()->adminUrl . 'options-plugin.php?config=Access">' . _t('前往设置') . '</a>';
                 # 初始化数据库如果不存在
-                if (!$db->fetchRow($db->query("SELECT name FROM sqlite_master WHERE TYPE='table' AND name='{$prefix}access_log';", Typecho_Db::READ))) {
+                if (!$db->fetchRow($db->query("SELECT name FROM sqlite_master WHERE TYPE='table' AND name='{$prefix}access';", Typecho_Db::READ))) {
                     foreach ($scripts as $script) {
                         $script = trim($script);
                         if ($script) {
