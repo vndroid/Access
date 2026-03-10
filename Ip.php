@@ -189,10 +189,10 @@ class Ip
 
         $json = json_decode($body, true);
         if (!is_array($json) || empty($json['ip'])) {
-            return ['status' => 'failure', 'error' => '响应数据异常', 'country' => '', 'region' => '', 'city' => ''];
+            return ['status' => 'failure', 'error' => '响应数据异常', 'country' => null, 'region' => null, 'city' => null];
         }
         if ($json['bogon'] === true) {
-            return ['status' => 'success', 'error' => '保留地址区段', 'country' => '', 'region' => '', 'city' => ''];
+            return ['status' => 'success', 'error' => '保留地址区段', 'country' => null, 'region' => null, 'city' => null];
         }
 
         return [
@@ -214,6 +214,8 @@ class Ip
 
     /**
      * 通过 KeyCDN 接口查询（免费 fallback 接口）
+     *
+     * @throws Exception
      */
     private static function queryKeyCdn(string $ip): array
     {
@@ -237,13 +239,19 @@ class Ip
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        if ($body === false || $httpCode !== 200) {
-            return ['status' => 'failure', 'country' => null, 'city' => null];
+        if ($body === false) {
+            return ['status' => 'failure', 'error' => 'cURL 请求失败', 'country' => null, 'region' => null, 'city' => null];
+        }
+
+        if ($httpCode !== 200) {
+            $err = json_decode($body, true);
+            $msg = $err['error'] ?? ('HTTP ' . $httpCode);
+            return ['status' => 'failure', 'error' => $msg, 'country' => null, 'region' => null, 'city' => null];
         }
 
         $json = json_decode($body, true);
         if (!is_array($json) || ($json['status'] ?? '') !== 'success') {
-            return ['status' => 'failure', 'country' => null, 'city' => null];
+            return ['status' => 'failure', 'error' => '响应数据异常', 'country' => null, 'region' => null, 'city' => null];
         }
 
         $geo = $json['data']['geo'] ?? [];

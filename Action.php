@@ -48,12 +48,19 @@ class Action extends Widget implements ActionInterface
         try {
             $result = Ip::find($ip);
             if ($result['status'] === 'success') {
-                $response = [
-                    'code' => 0,
-                    'data' => $result,
-                    'msg' => $result['error'],
-                ];
-
+                if (!empty($result['country']) && !empty($result['region']) && !empty($result['city'])) {
+                    $response = [
+                        'code' => 0,
+                        'data' => $result,
+                        'msg' => null,
+                    ];
+                } else {
+                    $response = [
+                        'code' => 0,
+                        'data' => $result,
+                        'msg' => $result['error'],
+                    ];
+                }
             } else {
                 $response = [
                     'code' => 500,
