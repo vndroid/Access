@@ -220,7 +220,7 @@ class Ip
     private static function queryKeyCdn(string $ip): array
     {
         if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-            return ['status' => 'failure', 'error' => '保留地址区段', 'country' => null, 'region' => null, 'city' => null];
+            return ['status' => 'success', 'error' => '保留地址区段', 'country' => null, 'region' => null, 'city' => null];
         }
 
         $config = Options::alloc()->plugin(basename(__DIR__));
