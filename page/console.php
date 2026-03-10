@@ -49,7 +49,7 @@ $initAction = $access->action;
                         <div class="btn-group btn-drop">
                             <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only"><?php _e('操作'); ?></i><?php _e('选中项'); ?> <i class="i-caret-down"></i></button>
                             <ul class="dropdown-menu">
-                                <li><a data-action="delete" href="javascript:"><?php _e('删除'); ?></a></li>
+                                <li><button type="button" data-action="delete" class="access-delete-btn"><?php _e('删除'); ?></button></li>
                             </ul>
                         </div>
                     </div>
@@ -117,7 +117,7 @@ $initAction = $access->action;
                         <div class="btn-group btn-drop">
                             <button class="btn dropdown-toggle btn-s" type="button"><i class="sr-only"><?php _e('操作'); ?></i><?php _e('选中项'); ?> <i class="i-caret-down"></i></button>
                             <ul class="dropdown-menu">
-                                <li><a data-action="delete" href="javascript:"><?php _e('删除'); ?></a></li>
+                                <li><button type="button" data-action="delete" class="access-delete-btn"><?php _e('删除'); ?></button></li>
                             </ul>
                         </div>
                     </div>
@@ -532,13 +532,30 @@ include 'table-js.php';
             loadLogs({ page: 1, type: logsState.type, filter: 'all', ip: '', cid: '', path: '' });
         });
 
+        // 全选
+        $(document).on('click', '.typecho-table-select-all', function() {
+            var checked = $(this).prop('checked');
+            $('.typecho-list-table input[type="checkbox"]').prop('checked', checked);
+            $('.typecho-table-select-all').prop('checked', checked);
+        });
+
+        // 行点击
+        $(document).on('click', '.typecho-list-table tr', function(e) {
+            if ($(e.target).is('input[type="checkbox"]') || $(e.target).is('a') || $(e.target).is('button')) {
+                return;
+            }
+            var $checkbox = $(this).find('input[type="checkbox"]');
+            $checkbox.prop('checked', !$checkbox.prop('checked'));
+        });
+
         // 删除
-        $(document).on('click', '.dropdown-menu a[data-action="delete"]', function() {
+        $(document).on('click', 'button[data-action="delete"]', function() {
             swal({
                 title: '确认操作', text: '是否删除选定的记录？', type: 'warning',
                 showCancelButton: true, confirmButtonColor: '#DD6B55',
                 confirmButtonText: '是', cancelButtonText: '否', closeOnConfirm: false
-            }, function() {
+            }, function(isConfirm) {
+                if (!isConfirm) return;
                 var ids = [];
                 $('.typecho-list-table input[type="checkbox"]').each(function() {
                     if (this.checked) ids.push($(this).data('id'));

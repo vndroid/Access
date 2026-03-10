@@ -36,3 +36,18 @@ div form.search-form {
     font-family: "Consolas", "Menlo", "Monaco", "Courier New", monospace;
     font-size: 12px;
 }
+
+.access-delete-btn {
+    display: block;
+    width: 100%;
+    padding: 6px 15px;
+    text-align: left;
+    border: none;
+    background: none;
+    color: #444;
+    cursor: pointer;
+    font-size: 14px;
+}
+.access-delete-btn:hover {
+    background-color: #f6f6f6;
+}
