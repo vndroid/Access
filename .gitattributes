@@ -1,3 +1,4 @@
 *.php linguist-language=php
 *.js linguist-language=javascript
 *.css linguist-language=css
+*.png filter=lfs diff=lfs merge=lfs -text
