@@ -34,7 +34,24 @@ div form.search-form {
 
 .typecho-list-table.mono-table.small-font {
     font-family: "Consolas", "Menlo", "Monaco", "Courier New", monospace;
-    font-size: 12px;
+    font-size: 75%;
+}
+
+.typecho-list-table.mono-table.small-font tbody tr {
+    height: 80px;
+}
+
+.typecho-list-table.mono-table.small-font thead tr {
+    height: 40px;
+}
+
+.typecho-list-table.mono-table.small-font tr th,
+.typecho-list-table.mono-table.small-font tr td {
+    vertical-align: middle;
+}
+
+.typecho-list-table.mono-table.small-font th {
+    font-size: 14px;
 }
 
 .access-delete-btn {
@@ -48,6 +65,7 @@ div form.search-form {
     cursor: pointer;
     font-size: 14px;
 }
+
 .access-delete-btn:hover {
     background-color: #f6f6f6;
 }
