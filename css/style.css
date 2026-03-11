@@ -51,3 +51,8 @@ div form.search-form {
 .access-delete-btn:hover {
     background-color: #f6f6f6;
 }
+
+.sweet-alert p {
+    white-space: pre-wrap;
+    word-break: break-all;
+}
