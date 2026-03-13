@@ -58,7 +58,7 @@ class Action extends Widget implements ActionInterface
                     $response = [
                         'code' => 0,
                         'data' => $result,
-                        'msg' => $result['error'],
+                        'msg' => $result['error'] ?? null,
                     ];
                 }
             } else {

@@ -130,7 +130,7 @@ class Ip
         if (!is_array($json) || empty($json['ip'])) {
             return ['status' => 'failure', 'error' => '响应数据异常', 'country' => '', 'region' => '', 'city' => ''];
         }
-        if ($json['bogon'] === true) {
+        if (isset($json['bogon']) && $json['bogon'] === true) {
             return ['status' => 'success', 'error' => '保留地址区段', 'country' => '', 'region' => '', 'city' => ''];
         }
 
@@ -191,7 +191,7 @@ class Ip
         if (!is_array($json) || empty($json['ip'])) {
             return ['status' => 'failure', 'error' => '响应数据异常', 'country' => null, 'region' => null, 'city' => null];
         }
-        if ($json['bogon'] === true) {
+        if (isset($json['bogon']) && $json['bogon'] === true) {
             return ['status' => 'success', 'error' => '保留地址区段', 'country' => null, 'region' => null, 'city' => null];
         }
 
