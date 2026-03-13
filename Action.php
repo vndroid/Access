@@ -64,7 +64,7 @@ class Action extends Widget implements ActionInterface
             } else {
                 $response = [
                     'code' => 500,
-                    'data' => $result['error'] ?? '查询失败',
+                    'data' => $result['error'] ?? null,
                     'msg' => '查询失败',
                 ];
             }
