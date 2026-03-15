@@ -453,21 +453,21 @@ include 'table-js.php';
             return false;
         });
         $('a[data-action="ip"]').off('click').on('click', function() {
-            swal('IP 查询中...', '正在查询...', 'info');
+            swal('定位查询中...', '正在查询...', 'info');
             $.ajax({
                 url: ipApiUrl, method: 'get', dataType: 'json',
                 data: { ip: $(this).data('ip') },
                 success: function(data) {
                     if (data.code === 0) {
-                        var location = [data.data.country, data.data.region, data.data.city].filter(Boolean).join('\n');
+                        let location = [data.data.country, data.data.region, data.data.city].filter(Boolean).join('\n');
                         if (location === '') {
-                            swal({ title: 'IP 查询成功', text: data.msg || '暂无该 IP 的地理位置信息', icon: 'success' });
+                            swal({ title: '查询成功', text: data.msg || '暂无该 IP 的地理位置信息', icon: 'success' });
                         } else {
-                            swal({ title: 'IP 查询成功', text: location, icon: 'success' });
+                            swal({ title: '查询成功', text: location, icon: 'success' });
                         }
-                    } else { swal('IP 查询失败', data.data, 'warning'); }
+                    } else { swal('查询失败', data.data, 'warning'); }
                 },
-                error: function() { swal('IP 查询失败', '网络异常或 PHP 环境配置异常', 'error'); }
+                error: function() { swal('查询失败', '网络异常或 PHP 环境配置异常', 'error'); }
             });
             return false;
         });

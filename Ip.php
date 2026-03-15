@@ -117,7 +117,7 @@ class Ip
         curl_close($ch);
 
         if ($body === false) {
-            return ['status' => 'failure', 'error' => 'cURL 请求失败', 'country' => null, 'region' => null, 'city' => null];
+            return ['status' => 'failure', 'error' => '请求返回失败', 'country' => null, 'region' => null, 'city' => null];
         }
 
         if ($httpCode !== 200) {
@@ -135,19 +135,28 @@ class Ip
         }
 
         return [
-            'status'      => 'success',
-            'ip'          => $json['ip'],
-            'country'     => self::iso2zh($json['country_code']) ?? '',
-            'countryCode' => $json['geo']['country_code'] ?? '',
-            'region'      => $json['geo']['region'] ?? '',
-            'regionCode'  => $json['geo']['region_code'] ?? '',
-            'city'        => $json['geo']['city'] ?? '',
-            'zip'         => $json['geo']['postal_code'] ?? '',
-            'timezone'    => $json['geo']['timezone'] ?? '',
-            'continent'   => $json['geo']['continent'] ?? '',
-            'asn'         => $json['as']['asn'] ?? '',
-            'as_name'     => $json['as']['name'] ?? '',
-            'query'       => $json['ip'],
+            'status'        => 'success',
+            'ip'            => $json['ip'],
+            'city'          => $json['geo']['city'] ?? '',
+            'region'        => $json['geo']['region'] ?? '',
+            'regionCode'    => $json['geo']['region_code'] ?? '',
+            'country'       => $json['geo']['country'] ?? '',
+            'countryCode'   => $json['geo']['country_code'] ?? '',
+            'continent'     => $json['geo']['continent'] ?? '',
+            'continentCode' => $json['geo']['continent_code'] ?? '',
+            'latitude'      => $json['geo']['latitude'] ?? '',
+            'longitude'     => $json['geo']['longitude'] ?? '',
+            'timezone'      => $json['geo']['timezone'] ?? '',
+            'postalCode'    => $json['geo']['postal_code'] ?? '',
+            'asn'           => $json['as']['asn'] ?? '',
+            'asName'        => $json['as']['name'] ?? '',
+            'asDomain'      => $json['as']['domain'] ?? '',
+            'asType'        => $json['as']['type'] ?? '',
+            'isAnonymous'   => $json['is_anonymous'] ?? '',
+            'isAnycast'     => $json['is_anycast'] ?? '',
+            'isHosting'     => $json['is_hosting'] ?? '',
+            'isMobile'      => $json['is_mobile'] ?? '',
+            'isSatellite'   => $json['is_satellite'] ?? '',
         ];
     }
 
@@ -196,19 +205,15 @@ class Ip
         }
 
         return [
-            'status'      => 'success',
-            'ip'          => $json['ip'],
-            'country'     => self::iso2zh($json['country_code']) ?? '',
-            'countryCode' => $json['country_code'] ?? '',
-            'region'      => '',
-            'regionCode'  => '',
-            'city'        => '',
-            'zip'         => '',
-            'timezone'    => '',
-            'continent'   => $json['continent'] ?? '',
-            'asn'         => $json['asn'] ?? '',
-            'as_name'     => $json['as_name'] ?? '',
-            'query'       => $json['ip'],
+            'status'        => 'success',
+            'ip'            => $json['ip'],
+            'asn'           => $json['asn'] ?? '',
+            'as_name'       => $json['as_name'] ?? '',
+            'as_domain'     => $json['as_domain'] ?? '',
+            'countryCode'   => $json['country_code'] ?? '',
+            'country'       => $json['country'] ?? '',
+            'continentCode' => $json['continent_code'] ?? '',
+            'continent'     => $json['continent'] ?? '',
         ];
     }
 
@@ -261,19 +266,24 @@ class Ip
         $geo = $json['data']['geo'] ?? [];
 
         return [
-            'status'      => 'success',
-            'ip'          => $geo['ip'] ?? $ip,
-            'country'     => $geo['country_name'] ?? '',
-            'countryCode' => $geo['country_code'] ?? '',
-            'region'      => $geo['region_name'] ?? '',
-            'regionCode'  => $geo['region_code'] ?? '',
-            'city'        => $geo['city'] ?? '',
-            'zip'         => $geo['postal_code'] ?? '',
-            'timezone'    => $geo['timezone'] ?? '',
-            'continent'   => $geo['continent_name'] ?? '',
-            'asn'         => $geo['asn'] ?? '',
-            'as_name'     => $geo['as_org'] ?? '',
-            'query'       => $geo['ip'] ?? $ip,
+            'status'        => 'success',
+            'host'          => $geo['host'] ?? null,
+            'ip'            => $geo['ip'] ?? $ip,
+            'asn'           => $geo['asn'] ?? null,
+            'isp'           => $geo['isp'] ?? null,
+            'country'       => $geo['country_name'] ?? null,
+            'countryCode'   => $geo['country_code'] ?? null,
+            'region'        => $geo['region_name'] ?? null,
+            'regionCode'    => $geo['region_code'] ?? null,
+            'city'          => $geo['city'] ?? null,
+            'zip'           => $geo['postal_code'] ?? null,
+            'continent'     => $geo['continent_name'] ?? null,
+            'continentCode' => $geo['continent_code'] ?? null,
+            'latitude'      => $geo['latitude'] ?? null,
+            'longitude'     => $geo['longitude'] ?? null,
+            'metroCode'     => $geo['metro_code'] ?? null,
+            'timezone'      => $geo['timezone'] ?? null,
+            'datetime'      => $geo['datetime'] ?? null,
         ];
     }
 }
