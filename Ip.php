@@ -68,28 +68,6 @@ class Ip
     }
 
     /**
-     * ISO 3166-1 alpha-2 国家码转国家名（简体中文）
-     *
-     * @param string $code 两位国家码，如 "AU"
-     * @return string 国家或地区中文名，如 "澳大利亚"
-     */
-    public static function iso2zh(string $code): string
-    {
-        if (!preg_match('/^[A-Za-z]{2}$/', $code)) {
-            return '未知';
-        }
-
-        $zhName = \Locale::getDisplayRegion('-' . strtoupper($code), 'zh_CN');
-
-        // 超过 10 个字符时截断
-        if (mb_strlen($zhName, 'UTF-8') > 10) {
-            $zhName = mb_substr($zhName, 0, 10, 'UTF-8');
-        }
-
-        return $zhName;
-    }
-
-    /**
      * 通过 IPinfo Core 接口查询地址详情
      *
      * @throws Exception

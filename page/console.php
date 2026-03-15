@@ -459,7 +459,8 @@ include 'table-js.php';
                 data: { ip: $(this).data('ip') },
                 success: function(data) {
                     if (data.code === 0) {
-                        let location = [data.data.country, data.data.region, data.data.city].filter(Boolean).join('\n');
+                        let geoData = data.i18n && data.i18n.country !== null ? data.i18n : data.data;
+                        let location = [geoData.country, geoData.region, geoData.city].filter(Boolean).join('\n');
                         if (location === '') {
                             swal({ title: '查询成功', text: data.msg || '暂无该 IP 的地理位置信息', icon: 'success' });
                         } else {
