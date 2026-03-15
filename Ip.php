@@ -23,10 +23,11 @@ class Ip
     {
         if (empty($ip)) {
             return [
-                "status" => "failure",
-                "country" => null,
-                "region" => null,
-                "city" => null,
+                'status'  => 'failure',
+                'error'   => 'IP地址为空',
+                'country' => null,
+                'region'  => null,
+                'city'    => null,
             ];
         }
 
@@ -35,10 +36,11 @@ class Ip
 
         if ($ipdot[0] < 0 || $ipdot[0] > 255 || count($ipdot) !== 4) {
             return [
-                "status" => "failure",
-                "country" => null,
-                "region" => null,
-                "city" => null,
+                'status'  => 'failure',
+                'error'   => 'IP地址不合法',
+                'country' => null,
+                'region'  => null,
+                'city'    => null,
             ];
         }
 
@@ -50,12 +52,7 @@ class Ip
         $token = $config->isToken ?? '';
 
         if ($token !== '') {
-            $isPaid = $config->isPaid ?? '0';
-            if ($isPaid === '1') {
-                $result = self::queryIpInfoCore($nip, $token);
-            } else {
-                $result = self::queryIpInfoLite($nip, $token);
-            }
+            $result = self::queryIpInfo($nip, $token);
         } else {
             $result = self::queryKeyCdn($nip);
         }
@@ -68,14 +65,21 @@ class Ip
     }
 
     /**
-     * 通过 IPinfo Core 接口查询地址详情
+     * 通过 IPinfo 接口查询地址详情
+     * 接口分为 Lite 和 Core 两种，分别为免费、付费接口
      *
      * @throws Exception
      */
-    private static function queryIpInfoCore(string $ip, string $token): array
+    private static function queryIpInfo(string $ip, string $token): array
     {
         $config = Options::alloc()->plugin(basename(__DIR__));
-        $url = 'https://api.ipinfo.io/lookup/' . $ip . '?token=' . $token;
+        $isPaid = $config->isPaid ?? '0';
+        if ($isPaid === '1') {
+            $officialUrl = 'https://api.ipinfo.io/lookup/';
+        } else {
+            $officialUrl = 'https://api.ipinfo.io/lite/';
+        }
+        $url = $officialUrl . $ip . '?token=' . $token;
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_URL, $url);
@@ -106,93 +110,52 @@ class Ip
 
         $json = json_decode($body, true);
         if (!is_array($json) || empty($json['ip'])) {
-            return ['status' => 'failure', 'error' => '响应数据异常', 'country' => '', 'region' => '', 'city' => ''];
-        }
-        if (isset($json['bogon']) && $json['bogon'] === true) {
-            return ['status' => 'success', 'error' => '保留地址区段', 'country' => '', 'region' => '', 'city' => ''];
-        }
-
-        return [
-            'status'        => 'success',
-            'ip'            => $json['ip'],
-            'city'          => $json['geo']['city'] ?? '',
-            'region'        => $json['geo']['region'] ?? '',
-            'regionCode'    => $json['geo']['region_code'] ?? '',
-            'country'       => $json['geo']['country'] ?? '',
-            'countryCode'   => $json['geo']['country_code'] ?? '',
-            'continent'     => $json['geo']['continent'] ?? '',
-            'continentCode' => $json['geo']['continent_code'] ?? '',
-            'latitude'      => $json['geo']['latitude'] ?? '',
-            'longitude'     => $json['geo']['longitude'] ?? '',
-            'timezone'      => $json['geo']['timezone'] ?? '',
-            'postalCode'    => $json['geo']['postal_code'] ?? '',
-            'asn'           => $json['as']['asn'] ?? '',
-            'asName'        => $json['as']['name'] ?? '',
-            'asDomain'      => $json['as']['domain'] ?? '',
-            'asType'        => $json['as']['type'] ?? '',
-            'isAnonymous'   => $json['is_anonymous'] ?? '',
-            'isAnycast'     => $json['is_anycast'] ?? '',
-            'isHosting'     => $json['is_hosting'] ?? '',
-            'isMobile'      => $json['is_mobile'] ?? '',
-            'isSatellite'   => $json['is_satellite'] ?? '',
-        ];
-    }
-
-    /**
-     * 通过 IPinfo Lite 接口查询（免费版）
-     * @throws Exception
-     */
-    private static function queryIpInfoLite(string $ip, string $token): array
-    {
-        $config = Options::alloc()->plugin(basename(__DIR__));
-        $url = 'https://api.ipinfo.io/lite/' . $ip . '?token=' . $token;
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4685.0 Safari/537.36');
-        $proxy = $config->socks5Host ?? '';
-        if ($proxy !== '') {
-            curl_setopt($ch, CURLOPT_PROXY, $proxy);
-            curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5_HOSTNAME);
-            $auth = $config->socks5Auth ?? '';
-            if ($auth !== '') {
-                curl_setopt($ch, CURLOPT_PROXYUSERPWD, $auth);
-            }
-        }
-        $body = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($body === false) {
-            return ['status' => 'failure', 'error' => 'cURL 请求失败', 'country' => null, 'region' => null, 'city' => null];
-        }
-
-        if ($httpCode !== 200) {
-            $err = json_decode($body, true);
-            $msg = $err['error'] ?? ('HTTP ' . $httpCode);
-            return ['status' => 'failure', 'error' => $msg, 'country' => null, 'region' => null, 'city' => null];
-        }
-
-        $json = json_decode($body, true);
-        if (!is_array($json) || empty($json['ip'])) {
             return ['status' => 'failure', 'error' => '响应数据异常', 'country' => null, 'region' => null, 'city' => null];
         }
         if (isset($json['bogon']) && $json['bogon'] === true) {
             return ['status' => 'success', 'error' => '保留地址区段', 'country' => null, 'region' => null, 'city' => null];
         }
 
-        return [
-            'status'        => 'success',
-            'ip'            => $json['ip'],
-            'asn'           => $json['asn'] ?? '',
-            'as_name'       => $json['as_name'] ?? '',
-            'as_domain'     => $json['as_domain'] ?? '',
-            'countryCode'   => $json['country_code'] ?? '',
-            'country'       => $json['country'] ?? '',
-            'continentCode' => $json['continent_code'] ?? '',
-            'continent'     => $json['continent'] ?? '',
-        ];
+        if ($isPaid === '1') {
+            return [
+                'status'        => 'success',
+                'ip'            => $json['ip'],
+                'city'          => $json['geo']['city'] ?? '',
+                'region'        => $json['geo']['region'] ?? '',
+                'regionCode'    => $json['geo']['region_code'] ?? '',
+                'country'       => $json['geo']['country'] ?? '',
+                'countryCode'   => $json['geo']['country_code'] ?? '',
+                'continent'     => $json['geo']['continent'] ?? '',
+                'continentCode' => $json['geo']['continent_code'] ?? '',
+                'latitude'      => $json['geo']['latitude'] ?? '',
+                'longitude'     => $json['geo']['longitude'] ?? '',
+                'timezone'      => $json['geo']['timezone'] ?? '',
+                'postalCode'    => $json['geo']['postal_code'] ?? '',
+                'asn'           => $json['as']['asn'] ?? '',
+                'asName'        => $json['as']['name'] ?? '',
+                'asDomain'      => $json['as']['domain'] ?? '',
+                'asType'        => $json['as']['type'] ?? '',
+                'isAnonymous'   => $json['is_anonymous'] ?? '',
+                'isAnycast'     => $json['is_anycast'] ?? '',
+                'isHosting'     => $json['is_hosting'] ?? '',
+                'isMobile'      => $json['is_mobile'] ?? '',
+                'isSatellite'   => $json['is_satellite'] ?? '',
+            ];
+        } elseif ($isPaid === '0') {
+            return [
+                'status'        => 'success',
+                'ip'            => $json['ip'],
+                'asn'           => $json['asn'] ?? '',
+                'as_name'       => $json['as_name'] ?? '',
+                'as_domain'     => $json['as_domain'] ?? '',
+                'countryCode'   => $json['country_code'] ?? '',
+                'country'       => $json['country'] ?? '',
+                'continentCode' => $json['continent_code'] ?? '',
+                'continent'     => $json['continent'] ?? '',
+            ];
+        } else {
+            return ['status' => 'failure', 'error' => '未知错误', 'country' => null, 'region' => null, 'city' => null];
+        }
     }
 
     /**
@@ -227,7 +190,7 @@ class Ip
         curl_close($ch);
 
         if ($body === false) {
-            return ['status' => 'failure', 'error' => 'cURL 请求失败', 'country' => null, 'region' => null, 'city' => null];
+            return ['status' => 'failure', 'error' => '请求返回失败', 'country' => null, 'region' => null, 'city' => null];
         }
 
         if ($httpCode !== 200) {

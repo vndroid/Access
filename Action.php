@@ -70,41 +70,33 @@ class Action extends Widget implements ActionInterface
         try {
             $result = Ip::find($ip);
             if ($result['status'] === 'success') {
-                if (!empty($result['country']) && !empty($result['region']) && !empty($result['city'])) {
-                    $response = [
-                        'code' => 0,
-                        'data' => $result,
-                        'msg'  => null,
-                        'i18n' => [
-                            'country' => self::iso2zh($result['countryCode']),
-                            'region'  => null,
-                            'city'    => null,
-                        ],
-                    ];
-                } else {
-                    $response = [
-                        'code' => 0,
-                        'data' => $result,
-                        'msg'  => $result['error'] ?? null,
-                        'i18n' => [
-                            'country' => null,
-                            'region'  => null,
-                            'city'    => null,
-                        ],
-                    ];
+                $response = [
+                    'code' => 0,
+                    'data' => $result,
+                    'msg'  => $result['error'] ?? null,
+                    'i18n' => [
+                        'country' => null,
+                        'region'  => null,
+                        'city'    => null,
+                    ],
+                ];
+                if (!empty($result['country'])) {
+                    $response['i18n']['country'] = self::iso2zh($result['countryCode']);
                 }
             } else {
                 $response = [
                     'code' => 500,
                     'data' => $result['error'] ?? null,
-                    'msg' => 'Error',
+                    'msg'  => 'ERROR',
+                    'i18n' => null,
                 ];
             }
         } catch (\Exception $e) {
             $response = [
                 'code' => 500,
                 'data' => $e->getMessage(),
-                'msg' => '查询异常',
+                'msg'  => 'ERROR',
+                'i18n' => null,
             ];
         }
 
