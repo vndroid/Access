@@ -234,6 +234,7 @@ include 'table-js.php';
 <script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.3.0/modules/series-label.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.3.0/modules/exporting.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.3.0/modules/export-data.src.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.loli.net/ajax/libs/highcharts/11.3.0/modules/accessibility.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script type="text/javascript">
 (function() {
     /* ==================== 常量 ==================== */
