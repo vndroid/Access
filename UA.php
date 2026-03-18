@@ -23,6 +23,7 @@ class UA
         'DuckDuckGo-Favicons-Bot',
         'Exabot',
         'Fish search',
+        'GigaExplorator',
         'Go-http-client',
         'Google AdSense',
         'Googlebot',
