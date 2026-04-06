@@ -218,7 +218,7 @@ $initAction = $access->action;
                 <h4 class="typecho-list-table-title">当月图表</h4>
                 <div class="typecho-table-wrap access-skeleton" id="chart-month" style="min-height:300px"></div>
 
-                <h4 class="typecho-list-table-title">文章访问量 Top</h4>
+                <h4 class="typecho-list-table-title">文章访问量</h4>
                 <div class="typecho-table-wrap access-skeleton" id="chart-post-pie" style="min-height:360px"></div>
                 </div>
 
