@@ -36,6 +36,7 @@ class Core
     public array $logs = [];
     public array $overview = [];
     public array $referer = [];
+    public array $postPie = [];
 
     /**
      * 构造函数，根据不同类型的请求，计算不同的数据并渲染输出
@@ -83,6 +84,7 @@ class Core
     {
         $this->parseOverview();
         $this->parseReferer();
+        $this->parsePostPie();
 
         return [
             'overview' => [
@@ -92,7 +94,61 @@ class Core
             ],
             'referer'    => $this->referer,
             'chart_data' => json_decode($this->overview['chart_data'], true),
+            'post_pie'   => $this->postPie,
         ];
+    }
+
+    /**
+     * 生成文章访问量饼图数据（Top N）
+     *
+     * @return void
+     */
+    protected function parsePostPie(): void
+    {
+        $limit = (int)$this->config->pageSize;
+        $limit = $limit > 0 ? min($limit, 50) : 20;
+
+        $cacheKey = 'overview:post_pie:top' . $limit;
+        $cached = $this->getCache($cacheKey);
+        if ($cached !== null) {
+            $this->postPie = $cached;
+            return;
+        }
+
+        $rows = $this->db->fetchAll(
+            $this->db
+                ->select('table.access.content_id AS cid', 'MAX(table.contents.title) AS title', 'COUNT(1) AS cnt')
+                ->from('table.access')
+                ->join('table.contents', 'table.access.content_id = table.contents.cid', Db::LEFT_JOIN)
+                ->where('table.access.content_id IS NOT NULL')
+                ->where('table.access.content_id <> ?', 0)
+                ->where('table.contents.type = ? OR table.contents.type IS NULL', 'post')
+                ->group('table.access.content_id')
+                ->order('cnt', Db::SORT_DESC)
+                ->limit($limit)
+        );
+
+        $series = [];
+        foreach ($rows as $row) {
+            $cid = (int)($row['cid'] ?? 0);
+            if ($cid <= 0) {
+                continue;
+            }
+
+            $title = trim((string)($row['title'] ?? ''));
+            if ($title === '') {
+                $title = _t('已删除文章 #%d', $cid);
+            }
+
+            $series[] = [
+                'cid' => $cid,
+                'name' => $title,
+                'y' => (int)($row['cnt'] ?? 0),
+            ];
+        }
+
+        $this->postPie = $series;
+        $this->setCache($cacheKey, $this->postPie);
     }
 
     /**

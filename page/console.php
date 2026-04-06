@@ -217,6 +217,9 @@ $initAction = $access->action;
 
                 <h4 class="typecho-list-table-title">当月图表</h4>
                 <div class="typecho-table-wrap access-skeleton" id="chart-month" style="min-height:300px"></div>
+
+                <h4 class="typecho-list-table-title">文章访问量 Top</h4>
+                <div class="typecho-table-wrap access-skeleton" id="chart-post-pie" style="min-height:360px"></div>
                 </div>
 
             </div>
@@ -312,6 +315,42 @@ include 'table-js.php';
         });
     };
 
+    let printPieChart = function($el, data) {
+        if (!data || !data.length) {
+            $el.html('<h6 class="typecho-list-table-title">暂无数据</h6>');
+            return;
+        }
+
+        $el.highcharts({
+            chart: { type: 'pie' },
+            title: { text: '文章访问量占比' },
+            subtitle: { text: 'Generate By AccessPlugin' },
+            tooltip: {
+                pointFormat: '<b>{point.y}</b> ({point.percentage:.1f}%)'
+            },
+            accessibility: {
+                point: {
+                    valueSuffix: '%'
+                }
+            },
+            plotOptions: {
+                pie: {
+                    allowPointSelect: true,
+                    cursor: 'pointer',
+                    dataLabels: {
+                        enabled: true,
+                        format: '{point.name}: {point.y}'
+                    }
+                }
+            },
+            series: [{
+                name: '访问量',
+                colorByPoint: true,
+                data: data
+            }]
+        });
+    };
+
     function loadOverview() {
         $.ajax({
             url: overviewApiUrl, method: 'get', dataType: 'json',
@@ -349,9 +388,11 @@ include 'table-js.php';
                 var $t = $('#chart-today').removeClass('access-skeleton');
                 var $y = $('#chart-yesterday').removeClass('access-skeleton');
                 var $m = $('#chart-month').removeClass('access-skeleton');
+                var $p = $('#chart-post-pie').removeClass('access-skeleton');
                 printChart($t, d.chart_data.today);
                 printChart($y, d.chart_data.yesterday);
                 printChart($m, d.chart_data.month);
+                printPieChart($p, d.post_pie || []);
             },
             error: function() { $('#panel-overview .access-skeleton').text('加载失败'); }
         });
@@ -493,7 +534,7 @@ include 'table-js.php';
                 $('#ov-today-pv, #ov-today-uv, #ov-today-ip, #ov-yesterday-pv, #ov-yesterday-uv, #ov-yesterday-ip, #ov-total-pv, #ov-total-uv, #ov-total-ip').text('--').addClass('access-skeleton');
                 $('#referer-domain-body').html('<tr><td colspan="3" class="access-skeleton">加载中…</td></tr>');
                 $('#referer-url-body').html('<tr><td colspan="3" class="access-skeleton">加载中…</td></tr>');
-                $('#chart-today, #chart-yesterday, #chart-month').empty().addClass('access-skeleton');
+                $('#chart-today, #chart-yesterday, #chart-month, #chart-post-pie').empty().addClass('access-skeleton');
                 loadOverview();
             } else if (currentTab === 'logs') {
                 logsLoaded = false;
