@@ -39,6 +39,7 @@ class UA
         'Perl tool',
         'Presto',
         'Python-urllib',
+        'python-httpx',
         'Reeder',
         'Scrapy',
         'Sogou Spider',
