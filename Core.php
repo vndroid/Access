@@ -5,6 +5,7 @@ namespace TypechoPlugin\Access;
 use Redis;
 use Typecho\Cookie;
 use Typecho\Db;
+use Typecho\Db\Exception as DbException;
 use Typecho\I18n;
 use Typecho\Plugin\Exception as PluginException;
 use Typecho\Request;
@@ -42,6 +43,8 @@ class Core
      * 构造函数，根据不同类型的请求，计算不同的数据并渲染输出
      *
      * @access public
+     * @throws PluginException
+     * @throws DbException
      */
     public function __construct()
     {
@@ -79,6 +82,7 @@ class Core
      *
      * @access public
      * @return array
+     * @throws DbException
      */
     public function getOverviewData(): array
     {
@@ -102,6 +106,7 @@ class Core
      * 生成文章访问量饼图数据（Top N）
      *
      * @return void
+     * @throws DbException
      */
     protected function parsePostPie(): void
     {
@@ -155,11 +160,12 @@ class Core
      * 获取日志页全部数据（供 AJAX 接口调用）
      *
      * @access public
-     * @param int    $page   页码
-     * @param int    $type   类型 1=人类 2=爬虫 3=全部
+     * @param int $page 页码
+     * @param int $type 类型 1=人类 2=爬虫 3=全部
      * @param string $filter 筛选类型 all/ip/post/path
      * @param string $filterValue 筛选值
      * @return array
+     * @throws DbException
      */
     public function getLogsData(int $page, int $type, string $filter, string $filterValue): array
     {
