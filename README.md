@@ -36,6 +36,7 @@ Current Lauguage: **English** | [Simplified Chinese](/README_CN.md)
 * The plugin directory name must be 'Access'.
 * Need PHP Calendar ext.
 * Need PHP cURL ext.
+* MySQL / MariaDB, SQLite and PostgreSQL are supported. The schema files live in `sql/MySQL.sql`, `sql/SQLite.sql` and `sql/PostgreSQL.sql`; the right one is picked automatically from the active Typecho database adapter.
 
 ### Features
 
@@ -45,6 +46,7 @@ Current Lauguage: **English** | [Simplified Chinese](/README_CN.md)
 - Add remove all logs when the plugin is disabled feature.
 - Support Frontend or Backend write log.
 - Log filter supports filtering by ip, article title, and route
+- Works on MySQL / MariaDB, SQLite and PostgreSQL
 
 ### Author
 

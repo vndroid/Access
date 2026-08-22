@@ -34,6 +34,7 @@
 * 如果用户使用旧版本的数据库升级到当前分支，请手动修改表的 ip 字段为 char(38) 以便支持 IPv6 地址的记录及查询；
 * 需要 PHP Calendar 扩展；
 * 需要 PHP cURL 扩展；
+* 支持 MySQL / MariaDB、SQLite 和 PostgreSQL 三种数据库，建表脚本分别位于 `sql/MySQL.sql`、`sql/SQLite.sql` 和 `sql/PostgreSQL.sql`，启用插件时会按当前适配器自动选择；
 
 ### 功能亮点
 
@@ -44,10 +45,11 @@
 - 使用较精准的在线地址分析接口（有主备双接口）
 - 支持后端/前端两种方式写入日志
 - 支持根据 IP 、文章、标题、路由等进行分类排序日志
+- 支持 MySQL / MariaDB、SQLite 和 PostgreSQL
 
 ### 待办事项
 
-- 兼容其他数据库，比如 PostgreSQL 。
+- 暂无
 
 ### 开发者
 

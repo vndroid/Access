@@ -80,7 +80,12 @@ class Plugin implements PluginInterface
 
         if ($config->isDrop == 1) {
             $db = Db::get();
-            $db->query("DROP TABLE `{$db->getPrefix()}access`", Db::WRITE);
+            $table = $db->getPrefix() . 'access';
+            // PostgreSQL 不支持反引号，且未加引号的标识符会被折叠为小写，与查询构造器的行为保持一致
+            $dropSql = str_contains($db->getAdapterName(), 'Pgsql')
+                ? "DROP TABLE IF EXISTS {$table}"
+                : "DROP TABLE IF EXISTS `{$table}`";
+            $db->query($dropSql, Db::WRITE);
             $cleanFlag = true;
         }
         Helper::removePanel(1, self::$panel);
@@ -340,8 +345,39 @@ class Plugin implements PluginInterface
             } catch (\Exception $e) {
                 throw new PluginException($e->getMessage());
             }
+        } elseif (str_contains($adapterName, 'Pgsql')) {
+            $prefix = $db->getPrefix();
+            $scripts = file_get_contents(__TYPECHO_ROOT_DIR__ . __TYPECHO_PLUGIN_DIR__ . '/Access/sql/PostgreSQL.sql');
+            $scripts = str_replace('typecho_', $prefix, $scripts);
+            $scripts = explode(';', $scripts);
+            try {
+                $configLink = '<a href="' . Helper::options()->adminUrl('options-plugin.php?config=Access', true) . '">' . _t('前往设置') . '</a>';
+                # 初始化数据库如果不存在
+                // current_schemas(false) 即当前 search_path，与未加限定的 CREATE TABLE 落点一致
+                $tableExists = $db->fetchRow($db->query(
+                    "SELECT tablename FROM pg_catalog.pg_tables
+                     WHERE schemaname = ANY (current_schemas(false)) AND tablename = '{$prefix}access'",
+                    Db::READ
+                ));
+                if (!$tableExists) {
+                    foreach ($scripts as $script) {
+                        $script = trim($script);
+                        if ($script) {
+                            $db->query($script, Db::WRITE);
+                        }
+                    }
+                    $msg = _t('成功创建数据表，插件启用成功，') . $configLink;
+                } else {
+                    $msg = _t('数据表已经存在，插件启用成功，') . $configLink;
+                }
+                return $msg;
+            } catch (DbException $e) {
+                throw new PluginException(_t('数据表建立失败，插件启用失败，错误信息：%s。', $e->getMessage()));
+            } catch (\Exception $e) {
+                throw new PluginException($e->getMessage());
+            }
         } else {
-            throw new PluginException(_t('当前适配器为%s，目前只支持 MySQL 和 SQLite', $adapterName));
+            throw new PluginException(_t('当前适配器为%s，目前只支持 MySQL、SQLite 和 PostgreSQL', $adapterName));
         }
     }
 

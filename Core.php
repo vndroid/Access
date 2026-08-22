@@ -188,13 +188,19 @@ class Core
 
         switch ($filter) {
             case 'ip':
-                $ip = bindec(decbin(ip2long($filterValue)));
+                if (filter_var($filterValue, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+                    $ip = $this->ip62long($filterValue);
+                } else {
+                    $ip = (string)bindec(decbin((int)ip2long($filterValue)));
+                }
                 $query->where('ip = ?', $ip);
                 $qcount->where('ip = ?', $ip);
                 break;
             case 'post':
-                $query->where('content_id = ?', $filterValue);
-                $qcount->where('content_id = ?', $filterValue);
+                // PostgreSQL 对整型列不接受空串等非数字字面量，这里统一转成整型
+                $cid = (int)$filterValue;
+                $query->where('content_id = ?', $cid);
+                $qcount->where('content_id = ?', $cid);
                 break;
             case 'path':
                 $query->where('path = ?', $filterValue);
@@ -249,8 +255,9 @@ class Core
             ->join('table.contents', 'table.access.content_id = table.contents.cid')
             ->where('table.access.content_id IS NOT NULL')
             ->where('table.contents.type = ?', 'post')
-            ->group('table.access.content_id')
-            ->group('table.contents.title')
+            // group() 为覆盖式赋值，多个分组字段必须写在同一次调用中，
+            // 否则 PostgreSQL 会因 content_id 未出现在 GROUP BY 中而报错
+            ->group('table.access.content_id, table.contents.title')
             ->order('count', Db::SORT_DESC));
 
         return [
@@ -651,8 +658,9 @@ class Core
     public function deleteLogs(array $ids)
     {
         foreach ($ids as $id) {
+            // PostgreSQL 对整型列不接受非数字字面量，这里统一转成整型
             $this->db->query($this->db->delete('table.access')
-                    ->where('id = ?', $id)
+                    ->where('id = ?', (int)$id)
             );
         }
     }
@@ -858,8 +866,13 @@ class Core
      */
     public function long2ip($long)
     {
-        $len = trim(strlen($long));
-        if ($len == 38) {
+        // 不同数据库返回的类型不一致（PostgreSQL 的 bpchar 还会补空格），先归一化为纯数字字符串
+        $long = trim((string)$long);
+        if ($long === '' || !ctype_digit($long)) {
+            return false;
+        }
+        // 超过 IPv4 上限（4294967295）的一律按 IPv6 处理，不再依赖字段长度
+        if (strlen($long) > 10 || (float)$long > 4294967295.0) {
             return $this->long2ip6($long);
         }
         if ($long < 0 || $long > 4294967295) return false;
