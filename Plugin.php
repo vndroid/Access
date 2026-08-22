@@ -57,6 +57,7 @@ class Plugin implements PluginInterface
         Helper::addRoute('access_logs_delete', '/access/logs/delete.json', '\TypechoPlugin\Access\Action', 'deleteLogs');
         Helper::addRoute('access_logs_overview', '/access/overview.json', '\TypechoPlugin\Access\Action', 'overview');
         Helper::addRoute('access_logs_details', '/access/logs/get.json', '\TypechoPlugin\Access\Action', 'logsParse');
+        Helper::addRoute('access_migrate', '/access/migrate.json', '\TypechoPlugin\Access\Action', 'migrate');
         TypechoPlugin::factory('\Widget\Archive')->beforeRender = [__CLASS__, 'backend'];
         TypechoPlugin::factory('\Widget\Archive')->footer = [__CLASS__, 'frontend'];
         TypechoPlugin::factory('admin/footer.php')->end = [__CLASS__, 'adminFooter'];
@@ -97,6 +98,7 @@ class Plugin implements PluginInterface
         Helper::removeRoute('access_logs_delete');
         Helper::removeRoute('access_logs_overview');
         Helper::removeRoute('access_logs_details');
+        Helper::removeRoute('access_migrate');
 
         return _t($cleanFlag ? '插件已禁用，数据表已清除' : '插件已禁用，数据表已保留');
     }
@@ -210,8 +212,9 @@ class Plugin implements PluginInterface
             '统计数据存放的位置。选择“跟随 Typecho”即与博客共用一个库；'
             . '选择其它类型则使用下方独立配置的数据库，保存设置时会自动建表，'
             . '并把主库中已有的统计数据迁移过去。历史数据超过 '
-            . Migrate::AUTO_LIMIT . ' 条时不会在后台自动迁移，'
-            . '保存后会提示改用命令行脚本 <code>tools/migrate.php</code>（支持断点续传）。'
+            . Migrate::AUTO_LIMIT . ' 条时不在保存设置时直接迁移，'
+            . '改为在统计控制台用进度条分批完成，也可以执行命令行脚本 '
+            . '<code>tools/migrate.php</code>，两者都支持断点续传。'
         );
         $dbHost = new Text(
             'dbHost', null, '127.0.0.1',
@@ -479,6 +482,7 @@ class Plugin implements PluginInterface
     private static function migrationNotice(array $migration, bool $created, string $where): ?string
     {
         $script = 'php ' . trim(__TYPECHO_PLUGIN_DIR__, '/') . '/Access/tools/migrate.php';
+        $console = Helper::options()->adminUrl('extending.php?panel=' . urlencode(self::$panel), true);
 
         switch ($migration['status']) {
             case 'done':
@@ -491,19 +495,23 @@ class Plugin implements PluginInterface
             case 'partial':
                 return _t(
                     '数据表已就绪%s，本次迁移了 %s 条，还剩 %s 条未迁移。'
-                    . '请在网站根目录执行 <code>%s</code> 继续，或重新保存一次设置。',
+                    . '请前往 <a href="%s">统计控制台</a> 用进度条继续迁移，'
+                    . '或在网站根目录执行 <code>%s</code>。两种方式都支持断点续传。',
                     $where,
                     $migration['moved'],
                     $migration['pending'],
+                    $console,
                     $script
                 );
 
             case 'skipped':
                 return _t(
-                    '数据表已就绪%s。主库中有 %s 条历史数据待迁移，数量较大未在后台自动执行，'
-                    . '请在网站根目录执行 <code>%s</code>（支持断点续传）。若不需要历史数据可忽略此提示。',
+                    '数据表已就绪%s。主库中有 %s 条历史数据待迁移，数量较大未在保存设置时直接执行，'
+                    . '请前往 <a href="%s">统计控制台</a> 点击“开始迁移”，'
+                    . '或在网站根目录执行 <code>%s</code>。若不需要历史数据可忽略此提示。',
                     $where,
                     $migration['pending'],
+                    $console,
                     $script
                 );
 

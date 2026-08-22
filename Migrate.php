@@ -111,6 +111,35 @@ class Migrate
     }
 
     /**
+     * 查询迁移进度
+     *
+     * @param Db $main 主库
+     * @param Db $target 目标库
+     * @param array $dbSettings
+     * @return array {marked: bool, total: int, migrated: int, pending: int}
+     */
+    public static function status(Db $main, Db $target, array $dbSettings): array
+    {
+        if (self::isMarked($main, self::fingerprint($dbSettings))) {
+            return ['marked' => true, 'total' => 0, 'migrated' => 0, 'pending' => 0];
+        }
+
+        if (!Database::tableExists($main, $main->getPrefix() . 'access')) {
+            return ['marked' => false, 'total' => 0, 'migrated' => 0, 'pending' => 0];
+        }
+
+        $total = self::sourceCount($main);
+        $migrated = $total > 0 ? self::migratedCount($target, self::sourceMaxId($main)) : 0;
+
+        return [
+            'marked' => false,
+            'total' => $total,
+            'migrated' => min($migrated, $total),
+            'pending' => max(0, $total - $migrated),
+        ];
+    }
+
+    /**
      * 执行迁移
      *
      * @param Db $main 主库

@@ -5,6 +5,7 @@ namespace TypechoPlugin\Access;
 use RuntimeException;
 use Typecho\Widget;
 use Widget\ActionInterface;
+use Widget\Options;
 
 if (!defined('__TYPECHO_ROOT_DIR__')) {
     exit;
@@ -174,6 +175,67 @@ class Action extends Widget implements ActionInterface
                 'code' => 500,
                 'data' => $e->getMessage(),
             ];
+        }
+
+        $this->response->throwJson($response);
+    }
+
+    /**
+     * 历史数据迁移接口（后台分片调用）
+     *
+     * 每次请求只跑一小段时间就返回，由前端反复调用直到完成，
+     * 这样既不会被 Web 服务器超时截断，也不需要服务器的 SSH 权限。
+     * 传 probe=1 只查询进度，不做任何写入。
+     */
+    public function migrate(): void
+    {
+        $this->checkAuth();
+
+        // throwJson 只在最后调用一次：它内部会终止流程（sandbox 模式下以异常形式），
+        // 放在 try 里会被下面的 catch 吞掉
+        try {
+            $config = Options::alloc()->plugin('Access');
+            $dbSettings = Database::settings($config);
+
+            if (!Database::isExternal($dbSettings)) {
+                # 跟随主库时没有迁移这回事
+                $data = [
+                    'external' => false, 'done' => true,
+                    'total' => 0, 'migrated' => 0, 'pending' => 0, 'moved' => 0,
+                ];
+            } else {
+                $main = Database::main();
+                $target = Database::get($dbSettings);
+                $status = Migrate::status($main, $target, $dbSettings);
+                $moved = 0;
+
+                if (!$status['marked'] && $status['pending'] > 0 && !$this->request->get('probe')) {
+                    $seconds = (int)$this->request->get('seconds', 3);
+                    $seconds = max(1, min($seconds, 10));
+
+                    $run = Migrate::run($main, $target, ['deadline' => microtime(true) + $seconds]);
+                    $moved = $run['moved'];
+                    $status = Migrate::status($main, $target, $dbSettings);
+                }
+
+                $done = $status['marked'] || $status['pending'] === 0;
+                if ($done) {
+                    Migrate::mark($main, Migrate::fingerprint($dbSettings));
+                }
+
+                $data = [
+                    'external' => true,
+                    'done' => $done,
+                    'total' => $status['total'],
+                    'migrated' => $done ? $status['total'] : $status['migrated'],
+                    'pending' => $status['pending'],
+                    'moved' => $moved,
+                ];
+            }
+
+            $response = ['code' => 0, 'data' => $data];
+        } catch (\Exception $e) {
+            $response = ['code' => 500, 'data' => $e->getMessage()];
         }
 
         $this->response->throwJson($response);

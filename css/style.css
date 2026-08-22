@@ -76,3 +76,29 @@ div form.search-form {
     white-space: pre-wrap;
     word-break: break-all;
 }
+
+/* ── 历史数据迁移进度 ── */
+.access-migrate {
+    margin: 0 0 1em;
+    padding: 12px 15px;
+    border: 1px solid rgba(217, 83, 79, .2);
+    border-left: 3px solid #d9534f;
+    background: #fdf7f7;
+    border-radius: 2px;
+}
+.access-migrate-text { margin: 0 0 8px; }
+.access-migrate-bar {
+    height: 6px;
+    background: #e6e6e6;
+    border-radius: 3px;
+    overflow: hidden;
+}
+.access-migrate-bar > span {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: #467b96;
+    transition: width .3s ease;
+}
+.access-migrate-actions { margin: 10px 0 0; }
+.access-migrate-actions .description { margin-left: 10px; }

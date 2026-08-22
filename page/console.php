@@ -29,6 +29,18 @@ $initAction = $access->action;
         <div class="typecho-page-title">
            <h2 id="access-page-title"><?php echo $access->title;?></h2>
         </div>
+
+        <!-- ========== 历史数据迁移（仅在使用独立数据库且有待迁移数据时出现） ========== -->
+        <div id="access-migrate" class="access-migrate" style="display:none">
+            <p class="access-migrate-text" id="access-migrate-text"></p>
+            <div class="access-migrate-bar"><span id="access-migrate-fill"></span></div>
+            <p class="access-migrate-actions">
+                <button type="button" class="btn btn-s primary" id="access-migrate-start"><?php _e('开始迁移'); ?></button>
+                <button type="button" class="btn btn-s" id="access-migrate-stop" style="display:none"><?php _e('暂停'); ?></button>
+                <span class="description" id="access-migrate-hint"><?php _e('迁移期间请勿关闭本页面；中途暂停或关闭后可随时回到这里继续。'); ?></span>
+            </p>
+        </div>
+
         <div class="row typecho-page-main" role="main">
             <div class="col-mb-12 typecho-list">
                 <div class="typecho-list-operate">
@@ -245,6 +257,7 @@ include 'table-js.php';
     let overviewApiUrl = '<?php echo rtrim(Helper::options()->index, '/') . '/access/overview.json'; ?>';
     let ipApiUrl       = '<?php echo rtrim(Helper::options()->index, '/') . '/access/geo.json'; ?>';
     let deleteApiUrl   = '<?php echo rtrim(Helper::options()->index, '/') . '/access/logs/delete.json'; ?>';
+    let migrateApiUrl  = '<?php echo rtrim(Helper::options()->index, '/') . '/access/migrate.json'; ?>';
     let adminUrl       = '<?php echo rtrim(Helper::options()->adminUrl, '/'); ?>';
     let panelName      = '<?php echo AccessPlugin::$panel; ?>';
     let initAction     = '<?php echo $initAction; ?>';
@@ -517,7 +530,88 @@ include 'table-js.php';
     }
 
     /* ==================== DOM Ready ==================== */
+    /* ==================== 历史数据迁移 ==================== */
+    let migrateRunning = false;
+
+    function formatNumber(n) {
+        return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
+    function migrateRender(d) {
+        let total = d.total || 0;
+        let migrated = d.migrated || 0;
+        let percent = total > 0 ? Math.min(100, migrated / total * 100) : 0;
+        $('#access-migrate-fill').css('width', percent.toFixed(1) + '%');
+        $('#access-migrate-text').html(
+            '检测到主库中有 <strong>' + formatNumber(total) + '</strong> 条历史统计数据需要迁移到独立数据库，'
+            + '已完成 <strong>' + formatNumber(migrated) + '</strong> 条（' + percent.toFixed(1) + '%）。'
+        );
+    }
+
+    function migrateFinish(message, type) {
+        migrateRunning = false;
+        $('#access-migrate-start').show().prop('disabled', false).text('开始迁移');
+        $('#access-migrate-stop').hide();
+        $('#access-migrate-hint').html(message);
+        if (type) { swal(type === 'success' ? '迁移完成' : '迁移中断', message, type); }
+    }
+
+    function migrateStep() {
+        if (!migrateRunning) return;
+        $.ajax({
+            url: migrateApiUrl, dataType: 'json', timeout: 120000,
+            success: function(res) {
+                if (!res || res.code !== 0) {
+                    migrateFinish('迁移出错：' + ((res && res.data) || '未知错误') + '，可稍后重试或改用命令行脚本。', 'error');
+                    return;
+                }
+                migrateRender(res.data);
+                if (res.data.done) {
+                    $('#access-migrate-fill').css('width', '100%');
+                    migrateFinish('历史数据已全部迁移完成，主库中的旧数据未做改动。', 'success');
+                    $('#access-migrate-start').hide();
+                    return;
+                }
+                migrateStep();
+            },
+            error: function(xhr) {
+                let tip = xhr && xhr.status === 404
+                    ? '迁移接口未注册，请先在插件管理中禁用并重新启用 Access 插件，或改用命令行脚本。'
+                    : '网络中断，已迁移的部分不会丢失，点击“开始迁移”可继续。';
+                migrateFinish(tip, 'error');
+            }
+        });
+    }
+
+    function migrateProbe() {
+        $.ajax({
+            url: migrateApiUrl, dataType: 'json', data: { probe: 1 },
+            success: function(res) {
+                if (!res || res.code !== 0 || !res.data || !res.data.external) return;
+                if (res.data.done || res.data.pending <= 0) return;
+                migrateRender(res.data);
+                $('#access-migrate').show();
+            }
+        });
+    }
+
     $(document).ready(function() {
+
+        // 历史数据迁移
+        migrateProbe();
+        $('#access-migrate-start').on('click', function() {
+            migrateRunning = true;
+            $(this).hide();
+            $('#access-migrate-stop').show();
+            $('#access-migrate-hint').text('正在迁移，请勿关闭本页面…');
+            migrateStep();
+        });
+        $('#access-migrate-stop').on('click', function() {
+            migrateRunning = false;
+            $(this).hide();
+            $('#access-migrate-start').show().text('继续迁移');
+            $('#access-migrate-hint').text('已暂停，进度已保存，点击“继续迁移”可接着做。');
+        });
 
         // 标签切换
         $('#access-tabs li[data-tab]').on('click', function(e) { e.preventDefault(); switchTab($(this).data('tab')); });
