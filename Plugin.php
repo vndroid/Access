@@ -209,7 +209,9 @@ class Plugin implements PluginInterface
             ], Database::FOLLOW, '统计数据库',
             '统计数据存放的位置。选择“跟随 Typecho”即与博客共用一个库；'
             . '选择其它类型则使用下方独立配置的数据库，保存设置时会自动建表，'
-            . '并在新库为空时把主库中已有的统计数据迁移过去。'
+            . '并把主库中已有的统计数据迁移过去。历史数据超过 '
+            . Migrate::AUTO_LIMIT . ' 条时不会在后台自动迁移，'
+            . '保存后会提示改用命令行脚本 <code>tools/migrate.php</code>（支持断点续传）。'
         );
         $dbHost = new Text(
             'dbHost', null, '127.0.0.1',
@@ -388,12 +390,16 @@ class Plugin implements PluginInterface
             }
 
             if ($external) {
-                # 独立库首次建表时，把主库里已有的统计数据搬过去
-                if ($created) {
-                    $moved = self::migrateFromMainDb($db);
-                    if ($moved > 0) {
-                        $msg = _t('成功创建数据表%s并迁移 %s 条历史数据，插件启用成功，', $where, $moved) . $configLink;
-                    }
+                # 把主库里已有的统计数据搬过去；每次进来都检查，
+                # 上次被超时截断的迁移会在这里自动接着做完
+                $migration = Migrate::ensure(
+                    $db,
+                    Database::settings($settings),
+                    microtime(true) + Migrate::AUTO_DEADLINE
+                );
+                $note = self::migrationNotice($migration, $created, $where);
+                if ($note !== null) {
+                    $msg = $note . $configLink;
                 }
             } else {
                 # 处理旧版本 access_log 残留数据（仅存在于主库）
@@ -463,61 +469,47 @@ class Plugin implements PluginInterface
     }
 
     /**
-     * 把 Typecho 主库中的历史统计数据分批迁移到独立数据库
-     * 仅在目标表为空时执行，避免重复导入
+     * 根据迁移结果生成后台提示文案
      *
-     * @param Db $target 独立数据库
-     * @return int 迁移的记录数
+     * @param array $migration Migrate::ensure() 的返回值
+     * @param bool $created 本次是否新建了数据表
+     * @param string $where 数据库位置描述
+     * @return string|null 为 null 表示沿用默认提示
      */
-    private static function migrateFromMainDb(Db $target): int
+    private static function migrationNotice(array $migration, bool $created, string $where): ?string
     {
-        try {
-            $main = Database::main();
-        } catch (\Exception $e) {
-            return 0;
+        $script = 'php ' . trim(__TYPECHO_PLUGIN_DIR__, '/') . '/Access/tools/migrate.php';
+
+        switch ($migration['status']) {
+            case 'done':
+                return _t(
+                    '%s，已迁移 %s 条历史数据，插件启用成功，',
+                    $created ? _t('成功创建数据表%s', $where) : _t('数据表已经存在%s', $where),
+                    $migration['moved']
+                );
+
+            case 'partial':
+                return _t(
+                    '数据表已就绪%s，本次迁移了 %s 条，还剩 %s 条未迁移。'
+                    . '请在网站根目录执行 <code>%s</code> 继续，或重新保存一次设置。',
+                    $where,
+                    $migration['moved'],
+                    $migration['pending'],
+                    $script
+                );
+
+            case 'skipped':
+                return _t(
+                    '数据表已就绪%s。主库中有 %s 条历史数据待迁移，数量较大未在后台自动执行，'
+                    . '请在网站根目录执行 <code>%s</code>（支持断点续传）。若不需要历史数据可忽略此提示。',
+                    $where,
+                    $migration['pending'],
+                    $script
+                );
+
+            default:
+                return null;
         }
-
-        if (!Database::tableExists($main, $main->getPrefix() . 'access')) {
-            return 0;
-        }
-
-        try {
-            $exists = $target->fetchAll($target->select('COUNT(1) AS count')->from('table.access'));
-            if ((int)($exists[0]['count'] ?? 0) > 0) {
-                return 0;
-            }
-        } catch (\Exception $e) {
-            return 0;
-        }
-
-        @set_time_limit(0);
-        $moved = 0;
-        $offset = 0;
-        $batchSize = 500;
-
-        while (true) {
-            $rows = $main->fetchAll(
-                $main->select()->from('table.access')
-                    ->order('id', Db::SORT_ASC)
-                    ->offset($offset)->limit($batchSize)
-            );
-            if (empty($rows)) {
-                break;
-            }
-            foreach ($rows as $row) {
-                # 丢弃主键，让目标库自行分配，避免自增序列错位
-                unset($row['id']);
-                try {
-                    $target->query($target->insert('table.access')->rows($row));
-                    $moved++;
-                } catch (\Exception $e) {
-                    // 单条失败不中断整体迁移
-                }
-            }
-            $offset += $batchSize;
-        }
-
-        return $moved;
     }
 
     /**
