@@ -12,6 +12,8 @@ use Typecho\Response;
 use Typecho\Widget\Helper\Form;
 use Typecho\Widget\Helper\Form\Element\Text;
 use Typecho\Widget\Helper\Form\Element\Radio;
+use Typecho\Widget\Helper\Form\Element\Select;
+use Typecho\Widget\Helper\Form\Element\Password;
 use Utils\Helper;
 use Widget\Notice;
 use Widget\Options;
@@ -26,7 +28,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.0.1
+ * @version 3.1.0
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
@@ -79,10 +81,11 @@ class Plugin implements PluginInterface
         }
 
         if ($config->isDrop == 1) {
-            $db = Db::get();
+            // 数据表可能位于独立数据库中，这里要按插件实际使用的连接来删
+            $db = Database::get();
             $table = $db->getPrefix() . 'access';
             // PostgreSQL 不支持反引号，且未加引号的标识符会被折叠为小写，与查询构造器的行为保持一致
-            $dropSql = str_contains($db->getAdapterName(), 'Pgsql')
+            $dropSql = Database::driver($db) === 'pgsql'
                 ? "DROP TABLE IF EXISTS {$table}"
                 : "DROP TABLE IF EXISTS `{$table}`";
             $db->query($dropSql, Db::WRITE);
@@ -198,6 +201,44 @@ class Plugin implements PluginInterface
             'redisAuth', null, '',
             'Redis 认证', 'Redis 服务密码，默认留空无密码'
         );
+        $dbType = new Select(
+            'dbType', [
+                Database::FOLLOW => '跟随 Typecho（默认）',
+                'mysql' => 'MySQL / MariaDB',
+                'pgsql' => 'PostgreSQL',
+            ], Database::FOLLOW, '统计数据库',
+            '统计数据存放的位置。选择“跟随 Typecho”即与博客共用一个库；'
+            . '选择其它类型则使用下方独立配置的数据库，保存设置时会自动建表，'
+            . '并在新库为空时把主库中已有的统计数据迁移过去。'
+        );
+        $dbHost = new Text(
+            'dbHost', null, '127.0.0.1',
+            '统计数据库地址', '独立数据库的主机名或 IP，MySQL 也可填写 unix socket 路径。仅在上方选择了独立数据库时生效'
+        );
+        $dbPort = new Text(
+            'dbPort', null, '',
+            '统计数据库端口', '留空则按类型使用默认端口（MySQL 3306，PostgreSQL 5432）'
+        );
+        $dbUser = new Text(
+            'dbUser', null, '',
+            '统计数据库用户名', '连接独立数据库使用的用户名'
+        );
+        $dbPass = new Password(
+            'dbPass', null, '',
+            '统计数据库密码', '连接独立数据库使用的密码，留空表示无密码'
+        );
+        $dbName = new Text(
+            'dbName', null, '',
+            '统计数据库名称', '独立数据库的库名，选择独立数据库时必填（需要预先创建好，插件只负责建表）'
+        );
+        $dbPrefix = new Text(
+            'dbPrefix', null, 'typecho_',
+            '统计数据表前缀', '独立数据库中数据表的前缀，最终表名为 [前缀]access'
+        );
+        $dbCharset = new Text(
+            'dbCharset', null, '',
+            '统计数据库字符集', '留空则按类型使用默认值（MySQL utf8mb4，PostgreSQL utf8）'
+        );
         $form->addInput($pageSize);
         $form->addInput($isDrop);
         $form->addInput($writeType);
@@ -209,6 +250,14 @@ class Plugin implements PluginInterface
         $form->addInput($redisHost);
         $form->addInput($redisPort->addRule('isInteger', _t('端口必须为纯数字')));
         $form->addInput($redisAuth);
+        $form->addInput($dbType);
+        $form->addInput($dbHost);
+        $form->addInput($dbPort);
+        $form->addInput($dbUser);
+        $form->addInput($dbPass);
+        $form->addInput($dbName);
+        $form->addInput($dbPrefix);
+        $form->addInput($dbCharset);
     }
 
     /**
@@ -222,7 +271,7 @@ class Plugin implements PluginInterface
     }
 
     /**
-     * 自定义配置处理，保存前校验 Redis 扩展
+     * 自定义配置处理，保存前校验 Redis 扩展与独立数据库连接
      *
      * @param array $settings 配置值
      * @param bool $isInit 是否为初始化
@@ -231,154 +280,244 @@ class Plugin implements PluginInterface
      */
     public static function configHandle(array $settings, bool $isInit): void
     {
-        if (!$isInit && isset($settings['redisCache']) && $settings['redisCache'] == '1') {
-            if (!extension_loaded('redis')) {
-                Notice::alloc()->set(_t('启用 Redis 缓存失败：PHP 未安装 redis 扩展，请先安装扩展后再启用'), 'error');
-                $referer = Request::getInstance()->getReferer();
-                Response::getInstance()
-                    ->setStatus(302)
-                    ->setHeader('Location', $referer ?: '/')
-                    ->respond();
+        # 插件启用时的初始化调用，此时 activate() 已经建过表，直接落库即可
+        if ($isInit) {
+            Edit::configPlugin('Access', $settings);
+            return;
+        }
+
+        if (isset($settings['redisCache']) && $settings['redisCache'] == '1' && !extension_loaded('redis')) {
+            self::goBack(_t('启用 Redis 缓存失败：PHP 未安装 redis 扩展，请先安装扩展后再启用'), 'error');
+        }
+
+        # 校验独立数据库配置，连不上就不保存，避免把插件配坏
+        $dbSettings = Database::settings($settings);
+        if ($dbSettings['type'] !== Database::FOLLOW) {
+            $error = Database::test($dbSettings);
+            if ($error !== null) {
+                self::goBack(_t('统计数据库连接失败，配置未保存：%s', $error), 'error');
             }
         }
 
         Edit::configPlugin('Access', $settings);
+
+        # 配置保存后，按新的数据库设置建表并迁移历史数据
+        try {
+            $msg = self::install($settings);
+        } catch (\Exception $e) {
+            self::goBack(_t('插件设置已经保存，但初始化数据表失败：%s', $e->getMessage()), 'error');
+            return;
+        }
+
+        self::goBack(_t('插件设置已经保存。%s', $msg), 'success');
+    }
+
+    /**
+     * 设置提示信息并返回来源页面（会终止后续流程）
+     *
+     * @param string $message
+     * @param string $type
+     * @return void
+     */
+    private static function goBack(string $message, string $type = 'notice'): void
+    {
+        Notice::alloc()->set($message, $type);
+        $referer = Request::getInstance()->getReferer();
+        Response::getInstance()
+            ->setStatus(302)
+            ->setHeader('Location', $referer ?: '/')
+            ->respond();
     }
 
     /**
      * 初始化以及升级插件数据库，如初始化失败,直接抛出异常
      *
+     * @param array|null $settings 保存配置时传入的新配置，为 null 时使用已保存的配置
      * @return string
      * @throws DbException
      * @throws PluginException
      */
-    public static function install(): string
+    public static function install(?array $settings = null): string
     {
         if (!str_ends_with(trim(__DIR__, '/\\'), 'Access')) {
             throw new PluginException(_t('插件目录名必须为 Access，且首字母大写，请检查插件目录名是否正确'));
         }
-        $db = Db::get();
-        $adapterName = $db->getAdapterName();
-        $msg = '';
 
-        if (str_contains($adapterName, 'Mysql')) {
-            $prefix = $db->getPrefix();
-            $scripts = file_get_contents(__TYPECHO_ROOT_DIR__ . __TYPECHO_PLUGIN_DIR__ . '/Access/sql/MySQL.sql');
-            $scripts = str_replace('typecho_', $prefix, $scripts);
-            $scripts = str_replace('%charset%', 'utf8mb4', $scripts);
-            $scripts = explode(';', $scripts);
-            try {
-                $configLink = '<a href="' . Helper::options()->adminUrl('options-plugin.php?config=Access', true) . '">' . _t('前往设置') . '</a>';
-                # 初始化数据库如果不存在
-                if (!$db->fetchRow($db->query("SHOW TABLES LIKE '{$prefix}access';", Db::READ))) {
-                    foreach ($scripts as $script) {
-                        $script = trim($script);
-                        if ($script) {
-                            $db->query($script, Db::WRITE);
-                        }
+        $external = Database::isExternal($settings);
+        try {
+            $db = Database::get($settings);
+        } catch (\Exception $e) {
+            throw new PluginException(_t('无法连接到配置的统计数据库，错误信息：%s。', $e->getMessage()));
+        }
+
+        $driver = Database::driver($db);
+        $prefix = $db->getPrefix();
+        $scriptFiles = [
+            'mysql'  => 'MySQL.sql',
+            'sqlite' => 'SQLite.sql',
+            'pgsql'  => 'PostgreSQL.sql',
+        ];
+        if (!isset($scriptFiles[$driver])) {
+            throw new PluginException(_t('当前适配器为%s，目前只支持 MySQL、SQLite 和 PostgreSQL', $db->getAdapterName()));
+        }
+
+        $configLink = '<a href="' . Helper::options()->adminUrl('options-plugin.php?config=Access', true) . '">'
+            . _t('前往设置') . '</a>';
+        $where = $external
+            ? _t('（独立数据库 %s，表 %saccess）', strtoupper($driver), $prefix)
+            : '';
+
+        try {
+            $created = false;
+            if (!Database::tableExists($db, $prefix . 'access')) {
+                $scripts = file_get_contents(
+                    __TYPECHO_ROOT_DIR__ . __TYPECHO_PLUGIN_DIR__ . '/Access/sql/' . $scriptFiles[$driver]
+                );
+                $scripts = str_replace('typecho_', $prefix, $scripts);
+                $scripts = str_replace('%charset%', 'utf8mb4', $scripts);
+                foreach (explode(';', $scripts) as $script) {
+                    $script = trim($script);
+                    if ($script !== '' && strtoupper($script) !== 'COMMIT') {
+                        $db->query($script, Db::WRITE);
                     }
-                    $msg = _t('成功创建数据表，插件启用成功，') . $configLink;
                 }
-                # 处理旧版本数据
-                if ($db->fetchRow($db->query("SHOW TABLES LIKE '{$prefix}access_log';", Db::READ))) {
-                    $rows = $db->fetchAll($db->select()->from('table.access_log'));
-                    set_time_limit(1800);
-                    foreach ($rows as $row) {
-                        $ua = new UA($row['ua']);
-                        $row['browser_id'] = $ua->getBrowserID();
-                        $row['browser_version'] = $ua->getBrowserVersion();
-                        $row['os_id'] = $ua->getOSID();
-                        $row['os_version'] = $ua->getOSVersion();
-                        $row['path'] = parse_url($row['url'], PHP_URL_PATH);
-                        $row['query_string'] = parse_url($row['url'], PHP_URL_QUERY);
-                        $row['ip'] = bindec(decbin(ip2long($row['ip'])));
-                        $row['entrypoint'] = $row['referer'];
-                        $row['entrypoint_domain'] = $row['referer_domain'];
-                        $row['time'] = $row['date'];
-                        $row['robot'] = $ua->isRobot() ? 1 : 0;
-                        $row['robot_id'] = $ua->getRobotID();
-                        $row['robot_version'] = $ua->getRobotVersion();
-                        unset($row['date']);
-                        try {
-                            $db->query($db->insert('table.access')->rows($row));
-                        } catch (DbException $e) {
-                            if ($e->getCode() != 23000) {
-                                throw new PluginException(_t('导入旧版数据失败，插件启用失败，错误信息：%s。', $e->getMessage()));
-                            }
-                        }
+                $created = true;
+                $msg = _t('成功创建数据表%s，插件启用成功，', $where) . $configLink;
+            } else {
+                $msg = _t('数据表已经存在%s，插件启用成功，', $where) . $configLink;
+            }
+
+            if ($external) {
+                # 独立库首次建表时，把主库里已有的统计数据搬过去
+                if ($created) {
+                    $moved = self::migrateFromMainDb($db);
+                    if ($moved > 0) {
+                        $msg = _t('成功创建数据表%s并迁移 %s 条历史数据，插件启用成功，', $where, $moved) . $configLink;
                     }
-                    $db->query("DROP TABLE `{$prefix}access_log`;", Db::WRITE);
+                }
+            } else {
+                # 处理旧版本 access_log 残留数据（仅存在于主库）
+                if (self::upgradeLegacyTable($db, $prefix)) {
                     $msg = _t('检测到旧版数据残留，已更新数据表，插件启用成功，') . $configLink;
                 }
-                # 如果已经存在新版数据则跳过
-                if ($db->fetchRow($db->query("SHOW TABLES LIKE '{$prefix}access';", Db::READ))) {
-                    $msg = _t('数据表已存在，插件启用成功，') . $configLink;
-                }
-                return $msg;
-            } catch (DbException $e) {
-                throw new PluginException(_t('数据表建立失败，插件启用失败，错误信息：%s。', $e->getMessage()));
-            } catch (\Exception $e) {
-                throw new PluginException($e->getMessage());
             }
-        } elseif (str_contains($adapterName, 'SQLite')) {
-            $prefix = $db->getPrefix();
-            $scripts = file_get_contents(__TYPECHO_ROOT_DIR__ . __TYPECHO_PLUGIN_DIR__ . '/Access/sql/SQLite.sql');
-            $scripts = str_replace('typecho_', $prefix, $scripts);
-            $scripts = explode(';', $scripts);
-            try {
-                $configLink = '<a href="' . Helper::options()->adminUrl('options-plugin.php?config=Access', true) . '">' . _t('前往设置') . '</a>';
-                # 初始化数据库如果不存在
-                if (!$db->fetchRow($db->query("SELECT name FROM sqlite_master WHERE TYPE='table' AND name='{$prefix}access';", Db::READ))) {
-                    foreach ($scripts as $script) {
-                        $script = trim($script);
-                        if ($script) {
-                            $db->query($script, Db::WRITE);
-                        }
-                    }
-                    $msg = _t('成功创建数据表，插件启用成功，') . $configLink;
-                } else {
-                    $msg = _t('数据表已经存在，插件启用成功，') . $configLink;
-                }
-                return $msg;
-            } catch (DbException $e) {
-                throw new PluginException(_t('数据表建立失败，插件启用失败，错误信息：%s。', $e->getMessage()));
-            } catch (\Exception $e) {
-                throw new PluginException($e->getMessage());
-            }
-        } elseif (str_contains($adapterName, 'Pgsql')) {
-            $prefix = $db->getPrefix();
-            $scripts = file_get_contents(__TYPECHO_ROOT_DIR__ . __TYPECHO_PLUGIN_DIR__ . '/Access/sql/PostgreSQL.sql');
-            $scripts = str_replace('typecho_', $prefix, $scripts);
-            $scripts = explode(';', $scripts);
-            try {
-                $configLink = '<a href="' . Helper::options()->adminUrl('options-plugin.php?config=Access', true) . '">' . _t('前往设置') . '</a>';
-                # 初始化数据库如果不存在
-                // current_schemas(false) 即当前 search_path，与未加限定的 CREATE TABLE 落点一致
-                $tableExists = $db->fetchRow($db->query(
-                    "SELECT tablename FROM pg_catalog.pg_tables
-                     WHERE schemaname = ANY (current_schemas(false)) AND tablename = '{$prefix}access'",
-                    Db::READ
-                ));
-                if (!$tableExists) {
-                    foreach ($scripts as $script) {
-                        $script = trim($script);
-                        if ($script) {
-                            $db->query($script, Db::WRITE);
-                        }
-                    }
-                    $msg = _t('成功创建数据表，插件启用成功，') . $configLink;
-                } else {
-                    $msg = _t('数据表已经存在，插件启用成功，') . $configLink;
-                }
-                return $msg;
-            } catch (DbException $e) {
-                throw new PluginException(_t('数据表建立失败，插件启用失败，错误信息：%s。', $e->getMessage()));
-            } catch (\Exception $e) {
-                throw new PluginException($e->getMessage());
-            }
-        } else {
-            throw new PluginException(_t('当前适配器为%s，目前只支持 MySQL、SQLite 和 PostgreSQL', $adapterName));
+
+            return $msg;
+        } catch (PluginException $e) {
+            throw $e;
+        } catch (DbException $e) {
+            throw new PluginException(_t('数据表建立失败，插件启用失败，错误信息：%s。', $e->getMessage()));
+        } catch (\Exception $e) {
+            throw new PluginException($e->getMessage());
         }
+    }
+
+    /**
+     * 迁移旧版 access_log 表的数据
+     *
+     * @param Db $db
+     * @param string $prefix
+     * @return bool 是否发生了迁移
+     * @throws PluginException
+     */
+    private static function upgradeLegacyTable(Db $db, string $prefix): bool
+    {
+        if (!Database::tableExists($db, $prefix . 'access_log')) {
+            return false;
+        }
+
+        $rows = $db->fetchAll($db->select()->from('table.access_log'));
+        @set_time_limit(1800);
+        foreach ($rows as $row) {
+            $ua = new UA($row['ua']);
+            $row['browser_id'] = $ua->getBrowserID();
+            $row['browser_version'] = $ua->getBrowserVersion();
+            $row['os_id'] = $ua->getOSID();
+            $row['os_version'] = $ua->getOSVersion();
+            $row['path'] = parse_url($row['url'], PHP_URL_PATH);
+            $row['query_string'] = parse_url($row['url'], PHP_URL_QUERY);
+            $row['ip'] = (string)bindec(decbin((int)ip2long($row['ip'])));
+            $row['entrypoint'] = $row['referer'];
+            $row['entrypoint_domain'] = $row['referer_domain'];
+            $row['time'] = $row['date'];
+            $row['robot'] = $ua->isRobot() ? 1 : 0;
+            $row['robot_id'] = $ua->getRobotID();
+            $row['robot_version'] = $ua->getRobotVersion();
+            unset($row['date']);
+            try {
+                $db->query($db->insert('table.access')->rows($row));
+            } catch (DbException $e) {
+                if ($e->getCode() != 23000) {
+                    throw new PluginException(_t('导入旧版数据失败，插件启用失败，错误信息：%s。', $e->getMessage()));
+                }
+            }
+        }
+
+        $legacy = $prefix . 'access_log';
+        $db->query(
+            Database::driver($db) === 'pgsql' ? "DROP TABLE {$legacy}" : "DROP TABLE `{$legacy}`",
+            Db::WRITE
+        );
+
+        return true;
+    }
+
+    /**
+     * 把 Typecho 主库中的历史统计数据分批迁移到独立数据库
+     * 仅在目标表为空时执行，避免重复导入
+     *
+     * @param Db $target 独立数据库
+     * @return int 迁移的记录数
+     */
+    private static function migrateFromMainDb(Db $target): int
+    {
+        try {
+            $main = Database::main();
+        } catch (\Exception $e) {
+            return 0;
+        }
+
+        if (!Database::tableExists($main, $main->getPrefix() . 'access')) {
+            return 0;
+        }
+
+        try {
+            $exists = $target->fetchAll($target->select('COUNT(1) AS count')->from('table.access'));
+            if ((int)($exists[0]['count'] ?? 0) > 0) {
+                return 0;
+            }
+        } catch (\Exception $e) {
+            return 0;
+        }
+
+        @set_time_limit(0);
+        $moved = 0;
+        $offset = 0;
+        $batchSize = 500;
+
+        while (true) {
+            $rows = $main->fetchAll(
+                $main->select()->from('table.access')
+                    ->order('id', Db::SORT_ASC)
+                    ->offset($offset)->limit($batchSize)
+            );
+            if (empty($rows)) {
+                break;
+            }
+            foreach ($rows as $row) {
+                # 丢弃主键，让目标库自行分配，避免自增序列错位
+                unset($row['id']);
+                try {
+                    $target->query($target->insert('table.access')->rows($row));
+                    $moved++;
+                } catch (\Exception $e) {
+                    // 单条失败不中断整体迁移
+                }
+            }
+            $offset += $batchSize;
+        }
+
+        return $moved;
     }
 
     /**
@@ -390,11 +529,15 @@ class Plugin implements PluginInterface
      */
     public static function backend($archive): void
     {
-        $config = Options::alloc()->plugin('Access');
+        // 统计失败（例如独立数据库暂时不可用）不应该影响博客本身的访问
+        try {
+            $config = Options::alloc()->plugin('Access');
 
-        if ($config->writeType == 1) {
-            $access = new Core();
-            $access->writeLogs($archive);
+            if ($config->writeType == 1) {
+                $access = new Core();
+                $access->writeLogs($archive);
+            }
+        } catch (\Throwable $e) {
         }
     }
 
@@ -407,7 +550,11 @@ class Plugin implements PluginInterface
      */
     public static function frontend($archive): void
     {
-        $config = Options::alloc()->plugin('Access');
+        try {
+            $config = Options::alloc()->plugin('Access');
+        } catch (\Throwable $e) {
+            return;
+        }
         if ($config->writeType == 0) {
             $index = rtrim(Helper::options()->index, '/');
             $access = new Core();

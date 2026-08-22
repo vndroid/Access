@@ -20,7 +20,12 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
 
 class Core
 {
+    /** 统计数据所在的数据库，可能是 Typecho 主库，也可能是独立配置的库 */
     protected Db $db;
+
+    /** Typecho 主库，用于读取文章标题等内容信息 */
+    protected Db $mainDb;
+
     protected Request $request;
     protected Response $response;
 
@@ -55,8 +60,9 @@ class Core
             file_exists($file) && I18n::addLang($file);
         }
         # Init variables
-        $this->db = Db::get();
         $this->config = Options::alloc()->plugin('Access');
+        $this->mainDb = Db::get();
+        $this->db = Database::get($this->config);
         $this->request = Request::getInstance();
         $this->response = Response::getInstance();
         if ($this->config->pageSize == null || $this->config->isDrop == null) {
@@ -120,27 +126,21 @@ class Core
             return;
         }
 
-        $rows = $this->db->fetchAll(
-            $this->db
-                ->select('table.access.content_id AS cid', 'MAX(table.contents.title) AS title', 'COUNT(1) AS cnt')
-                ->from('table.access')
-                ->join('table.contents', 'table.access.content_id = table.contents.cid', Db::LEFT_JOIN)
-                ->where('table.access.content_id IS NOT NULL')
-                ->where('table.access.content_id <> ?', 0)
-                ->where('table.contents.type = ? OR table.contents.type IS NULL', 'post')
-                ->group('table.access.content_id')
-                ->order('cnt', Db::SORT_DESC)
-                ->limit($limit)
-        );
+        // 统计库与内容库可能不是同一个库，无法 JOIN，改为两次查询后在 PHP 中合并
+        $counts = $this->fetchContentCounts();
+        $meta = $this->fetchContentMeta(array_column($counts, 'cid'));
 
         $series = [];
-        foreach ($rows as $row) {
-            $cid = (int)($row['cid'] ?? 0);
-            if ($cid <= 0) {
+        foreach ($counts as $item) {
+            $cid = $item['cid'];
+            $info = $meta[$cid] ?? null;
+
+            // 只统计文章；页面、附件等不计入，已被删除的内容（查不到）仍然保留
+            if ($info !== null && $info['type'] !== 'post') {
                 continue;
             }
 
-            $title = trim((string)($row['title'] ?? ''));
+            $title = $info === null ? '' : trim($info['title']);
             if ($title === '') {
                 $title = _t('已删除文章 #%d', $cid);
             }
@@ -148,12 +148,77 @@ class Core
             $series[] = [
                 'cid' => $cid,
                 'name' => $title,
-                'y' => (int)($row['cnt'] ?? 0),
+                'y' => $item['count'],
             ];
+
+            if (count($series) >= $limit) {
+                break;
+            }
         }
 
         $this->postPie = $series;
         $this->setCache($cacheKey, $this->postPie);
+    }
+
+    /**
+     * 从统计库中取出各内容的访问次数，按次数降序
+     *
+     * @access protected
+     * @return array [['cid' => int, 'count' => int], ...]
+     * @throws DbException
+     */
+    protected function fetchContentCounts(): array
+    {
+        $rows = $this->db->fetchAll(
+            $this->db->select('content_id AS cid', 'COUNT(1) AS count')
+                ->from('table.access')
+                ->where('content_id IS NOT NULL')
+                ->where('content_id <> ?', 0)
+                ->group('content_id')
+                ->order('count', Db::SORT_DESC)
+                // 次数相同时各数据库的返回顺序不一致，补一个稳定的次级排序
+                ->order('content_id', Db::SORT_ASC)
+        );
+
+        $result = [];
+        foreach ($rows as $row) {
+            $cid = (int)($row['cid'] ?? 0);
+            if ($cid > 0) {
+                $result[] = ['cid' => $cid, 'count' => (int)($row['count'] ?? 0)];
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * 到 Typecho 主库按 cid 批量取内容标题与类型
+     *
+     * @access protected
+     * @param array $cids
+     * @return array cid => ['title' => string, 'type' => string]
+     * @throws DbException
+     */
+    protected function fetchContentMeta(array $cids): array
+    {
+        $cids = array_values(array_unique(array_filter(array_map('intval', $cids))));
+        $meta = [];
+
+        foreach (array_chunk($cids, 200) as $chunk) {
+            $rows = $this->mainDb->fetchAll(
+                $this->mainDb->select('cid', 'title', 'type')
+                    ->from('table.contents')
+                    ->where('cid IN ?', $chunk)
+            );
+            foreach ($rows as $row) {
+                $meta[(int)$row['cid']] = [
+                    'title' => (string)($row['title'] ?? ''),
+                    'type' => (string)($row['type'] ?? ''),
+                ];
+            }
+        }
+
+        return $meta;
     }
 
     /**
@@ -250,15 +315,22 @@ class Core
             'type' => $type,
         ]));
 
-        $cidList = $this->db->fetchAll($this->db->select('DISTINCT content_id as cid, COUNT(1) as count, table.contents.title as title')
-            ->from('table.access')
-            ->join('table.contents', 'table.access.content_id = table.contents.cid')
-            ->where('table.access.content_id IS NOT NULL')
-            ->where('table.contents.type = ?', 'post')
-            // group() 为覆盖式赋值，多个分组字段必须写在同一次调用中，
-            // 否则 PostgreSQL 会因 content_id 未出现在 GROUP BY 中而报错
-            ->group('table.access.content_id, table.contents.title')
-            ->order('count', Db::SORT_DESC));
+        // 统计库与内容库可能不是同一个库，无法 JOIN，改为两次查询后在 PHP 中合并
+        $counts = $this->fetchContentCounts();
+        $meta = $this->fetchContentMeta(array_column($counts, 'cid'));
+        $cidList = [];
+        foreach ($counts as $item) {
+            $info = $meta[$item['cid']] ?? null;
+            // 对应原来的 INNER JOIN 语义：已删除的内容不出现在筛选下拉框里
+            if ($info === null || $info['type'] !== 'post') {
+                continue;
+            }
+            $cidList[] = [
+                'cid' => $item['cid'],
+                'count' => $item['count'],
+                'title' => $info['title'],
+            ];
+        }
 
         return [
             'list'    => $list,
@@ -808,7 +880,7 @@ class Core
      */
     public static function rewriteLogs()
     {
-        $db = Db::get();
+        $db = Database::get();
         $rows = $db->fetchAll($db->select()->from('table.access'));
         foreach ($rows as $row) {
             $ua = new UA($row['ua']);

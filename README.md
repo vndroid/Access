@@ -37,6 +37,7 @@ Current Lauguage: **English** | [Simplified Chinese](/README_CN.md)
 * Need PHP Calendar ext.
 * Need PHP cURL ext.
 * MySQL / MariaDB, SQLite and PostgreSQL are supported. The schema files live in `sql/MySQL.sql`, `sql/SQLite.sql` and `sql/PostgreSQL.sql`; the right one is picked automatically from the active Typecho database adapter.
+* Access logs share Typecho's own database by default, but the plugin settings can point them at a separate MySQL / PostgreSQL server instead (host, port, user, password, database, table prefix). The target database must already exist — the plugin only creates the table. The connection is tested before the settings are saved, existing stats are migrated over the first time the new database is empty, and article titles are resolved with a second query against Typecho's own database since a cross-database JOIN is not possible.
 
 ### Features
 
