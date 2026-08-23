@@ -205,11 +205,11 @@ class Plugin implements PluginInterface
         );
         $dbType = new Select(
             'dbType', [
-                Database::FOLLOW => '跟随 Typecho（默认）',
+                Database::FOLLOW => '跟随主引擎',
                 'mysql' => 'MySQL / MariaDB',
                 'pgsql' => 'PostgreSQL',
             ], Database::FOLLOW, '统计数据库',
-            '统计数据存放的位置。选择“跟随 Typecho”即与博客共用一个库；'
+            '统计数据存放的位置。默认与博客共用一个库；'
             . '选择其它类型则使用下方独立配置的数据库，保存设置时会自动建表，'
             . '并把主库中已有的统计数据迁移过去。历史数据超过 '
             . Migrate::AUTO_LIMIT . ' 条时不在保存设置时直接迁移，'
@@ -394,7 +394,7 @@ class Plugin implements PluginInterface
 
             if ($external) {
                 # 把主库里已有的统计数据搬过去；每次进来都检查，
-                # 上次被超时截断的迁移会在这里自动接着做完
+                # 被超时截断的迁移会在这里自动接着做完
                 $migration = Migrate::ensure(
                     $db,
                     Database::settings($settings),
