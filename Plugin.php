@@ -189,7 +189,7 @@ class Plugin implements PluginInterface
                 '0' => '禁用',
                 '1' => '启用',
             ], '0', '缓存加速',
-            '启用后来源统计等慢查询结果会缓存至 Redis，提高访问速度'
+            '启用后来源统计等慢查询结果会缓存至 Redis 服务中，提高加载速度'
         );
         $redisHost = new Text(
             'redisHost', null, '127.0.0.1',
@@ -211,14 +211,11 @@ class Plugin implements PluginInterface
             ], Database::FOLLOW, '统计数据库',
             '统计数据存放的位置。默认与博客共用一个库；'
             . '选择其它类型则使用下方独立配置的数据库，保存设置时会自动建表，'
-            . '并把主库中已有的统计数据迁移过去。历史数据超过 '
-            . Migrate::AUTO_LIMIT . ' 条时不在保存设置时直接迁移，'
-            . '改为在统计控制台用进度条分批完成，也可以执行命令行脚本 '
-            . '<code>tools/migrate.php</code>，两者都支持断点续传。'
+            . '并把主库中已有的统计数据迁移过去。'
         );
         $dbHost = new Text(
             'dbHost', null, '127.0.0.1',
-            '统计数据库地址', '独立数据库的主机名或 IP，MySQL 也可填写 unix socket 路径。仅在上方选择了独立数据库时生效'
+            '统计数据库地址', '独立数据库的主机名或 IP，MySQL 也可填写 UNIX 套接字地址。仅在上方选择了独立数据库时生效'
         );
         $dbPort = new Text(
             'dbPort', null, '',
@@ -233,7 +230,7 @@ class Plugin implements PluginInterface
             '统计数据库密码', '连接独立数据库使用的密码，留空表示无密码'
         );
         $dbName = new Text(
-            'dbName', null, '',
+            'dbName', null, 'access',
             '统计数据库名称', '独立数据库的库名，选择独立数据库时必填（需要预先创建好，插件只负责建表）'
         );
         $dbPrefix = new Text(
@@ -242,7 +239,7 @@ class Plugin implements PluginInterface
         );
         $dbCharset = new Text(
             'dbCharset', null, '',
-            '统计数据库字符集', '留空则按类型使用默认值（MySQL utf8mb4，PostgreSQL utf8）'
+            '统计数据库字符集', '留空则使用默认值（MySQL 为 utf8mb4，PostgreSQL 为 utf8）'
         );
         $form->addInput($pageSize);
         $form->addInput($isDrop);

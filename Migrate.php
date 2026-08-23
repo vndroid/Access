@@ -16,22 +16,22 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  * - 批量 INSERT，一条语句写入多行，减少往返次数
  * - 可断点续传：源表主键原样保留到目标表，续传位置 = 目标表中不超过源表最大 id 的最大 id
  * - 迁移开始前先把目标表的自增起点抬到源表最大 id 之上，
- *   这样迁移期间站点新产生的日志不会和迁移中的主键撞车
+ *   这样迁移期间新产生的日志不会和迁移中的主键撞车
  * - 后台保存设置时只自动迁移小表，超过阈值改由命令行脚本执行，避免被 Web 超时截断
  */
 class Migrate
 {
     /** 后台自动迁移的行数上限，超过则提示改用命令行脚本 */
-    public const AUTO_LIMIT = 50000;
+    public const int AUTO_LIMIT = 50000;
 
     /** 每批处理的行数 */
-    public const BATCH_SIZE = 1000;
+    public const int BATCH_SIZE = 1000;
 
     /** 后台自动迁移的时间预算（秒），超时则中断并提示继续 */
-    public const AUTO_DEADLINE = 20;
+    public const int AUTO_DEADLINE = 20;
 
     /** 需要迁移的字段，顺序固定，避免两边表结构差异导致列错位 */
-    public const COLUMNS = [
+    public const array COLUMNS = [
         'id', 'ua', 'browser_id', 'browser_version', 'os_id', 'os_version',
         'url', 'path', 'query_string', 'ip', 'entrypoint', 'entrypoint_domain',
         'referer', 'referer_domain', 'time', 'content_id', 'meta_id',
@@ -39,7 +39,7 @@ class Migrate
     ];
 
     /** 迁移完成标记在插件配置中的键名 */
-    private const DONE_KEY = 'dbMigrateDone';
+    private const string DONE_KEY = 'dbMigrateDone';
 
     /**
      * 保证目标库的数据已经就位，需要时执行迁移
