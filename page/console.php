@@ -269,6 +269,15 @@ include 'table-js.php';
         return div.innerHTML;
     }
 
+    function isSafeExternalUrl(value) {
+        try {
+            let url = new URL(value);
+            return url.protocol === 'http:' || url.protocol === 'https:';
+        } catch (e) {
+            return false;
+        }
+    }
+
     function formatDate(ts) {
         let d = new Date(ts * 1000);
         let pad = function(n) { return n < 10 ? '0' + n : n; };
@@ -455,7 +464,12 @@ include 'table-js.php';
                             html += ' <a href="#" class="logs-filter-link right-aligned" data-filter="ip" data-value="' + escapeHtml(String(ip)) + '">[?]</a>';
                         }
                         html += '</td>';
-                        html += '<td><a target="_blank" href="' + escapeHtml(String(log.referer)) + '">' + escapeHtml(String(log.referer)) + '</a></td>';
+                        let referer = String(log.referer || '');
+                        if (isSafeExternalUrl(referer)) {
+                            html += '<td><a target="_blank" rel="noopener noreferrer" href="' + escapeHtml(referer) + '">' + escapeHtml(referer) + '</a></td>';
+                        } else {
+                            html += '<td>' + escapeHtml(referer) + '</td>';
+                        }
                         html += '<td>' + formatDate(log.time) + '</td>';
                         html += '</tr>';
                     });
