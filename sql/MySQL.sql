@@ -21,6 +21,8 @@ CREATE TABLE `typecho_access` (
   `robot_version`     varchar(32)      default ''              COMMENT '爬虫版本',
   PRIMARY KEY (`id`),
   KEY `idx_time`              (`time`             ),
+  KEY `idx_time_ip`           (`time`,`ip`        ),
+  KEY `idx_time_ip_ua`        (`time`,`ip`,`ua`   ),
   KEY `idx_path`              (`path`             ),
   KEY `idx_ip_ua`             (`ip`,`ua`          ),
   KEY `idx_robot`             (`robot`, `time`    ),

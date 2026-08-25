@@ -22,6 +22,8 @@ CREATE TABLE typecho_access (
   PRIMARY KEY ("id")
 );
 CREATE INDEX typecho_access_time              ON typecho_access ("time"             );
+CREATE INDEX typecho_access_time_ip           ON typecho_access ("time", "ip"       );
+CREATE INDEX typecho_access_time_ip_ua        ON typecho_access ("time", "ip", "ua" );
 CREATE INDEX typecho_access_path              ON typecho_access ("path"             );
 CREATE INDEX typecho_access_ip_ua             ON typecho_access ("ip", "ua"         );
 CREATE INDEX typecho_access_robot             ON typecho_access ("robot", "time"    );

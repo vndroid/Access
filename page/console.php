@@ -382,54 +382,128 @@ include 'table-js.php';
         });
     };
 
-    function loadOverview() {
-        $.ajax({
-            url: overviewApiUrl, method: 'get', dataType: 'json',
-            success: function(res) {
-                if (res.code !== 0) {
-                    $('#panel-overview .access-skeleton').text(describeError(res, null));
-                    return;
-                }
-                overviewLoaded = true;
-                var d = res.data;
+    /*
+     * 概览分段加载
+     *
+     * 统计表很大时（几百万行）一次算完整个概览会超出 Web 服务器的超时时间，
+     * 而首次加载失败又意味着缓存永远建不起来，于是每次都是「首次加载」。
+     * 这里按 today / yesterday / total / referer / pie / month 顺序逐块请求：
+     * 每块都能在超时之前跑完并写入缓存，页面也随之逐步填充。
+     * 当月图表按天推进，一次跑不完就带着进度继续请求下一段。
+     */
+    let overviewSections = <?php echo json_encode(Core::overviewSections()); ?>;
 
-                $('#ov-today-pv').text(d.overview.today.pv.count).removeClass('access-skeleton');
-                $('#ov-today-uv').text(d.overview.today.uv.count).removeClass('access-skeleton');
-                $('#ov-today-ip').text(d.overview.today.ip.count).removeClass('access-skeleton');
-                $('#ov-yesterday-pv').text(d.overview.yesterday.pv.count).removeClass('access-skeleton');
-                $('#ov-yesterday-uv').text(d.overview.yesterday.uv.count).removeClass('access-skeleton');
-                $('#ov-yesterday-ip').text(d.overview.yesterday.ip.count).removeClass('access-skeleton');
-                $('#ov-total-pv').text(d.overview.total.pv).removeClass('access-skeleton');
-                $('#ov-total-uv').text(d.overview.total.uv).removeClass('access-skeleton');
-                $('#ov-total-ip').text(d.overview.total.ip).removeClass('access-skeleton');
+    /* 每段对应的骨架屏元素，出错时只把这一段标红，其余照常加载 */
+    let sectionTargets = {
+        today:     '#ov-today-pv, #ov-today-uv, #ov-today-ip, #chart-today',
+        yesterday: '#ov-yesterday-pv, #ov-yesterday-uv, #ov-yesterday-ip, #chart-yesterday',
+        total:     '#ov-total-pv, #ov-total-uv, #ov-total-ip',
+        referer:   '#referer-domain-body, #referer-url-body',
+        pie:       '#chart-post-pie',
+        month:     '#chart-month'
+    };
 
-                var domainHtml = '';
-                if (d.referer.domain && d.referer.domain.length) {
-                    $.each(d.referer.domain, function(i, v) {
-                        domainHtml += '<tr><td>' + (i+1) + '</td><td>' + escapeHtml(String(v.count)) + '</td><td>' + escapeHtml(String(v.value)) + '</td></tr>';
-                    });
-                } else { domainHtml = '<tr><td colspan="3">暂无数据</td></tr>'; }
-                $('#referer-domain-body').html(domainHtml);
+    let overviewToken = 0;   // 刷新时自增，用来作废上一轮还在飞的请求
 
-                var urlHtml = '';
-                if (d.referer.url && d.referer.url.length) {
-                    $.each(d.referer.url, function(i, v) {
-                        urlHtml += '<tr><td>' + (i+1) + '</td><td>' + escapeHtml(String(v.count)) + '</td><td>' + escapeHtml(String(v.value)) + '</td></tr>';
-                    });
-                } else { urlHtml = '<tr><td colspan="3">暂无数据</td></tr>'; }
-                $('#referer-url-body').html(urlHtml);
-
-                var $t = $('#chart-today').removeClass('access-skeleton');
-                var $y = $('#chart-yesterday').removeClass('access-skeleton');
-                var $m = $('#chart-month').removeClass('access-skeleton');
-                var $p = $('#chart-post-pie').removeClass('access-skeleton');
-                printChart($t, d.chart_data.today);
-                printChart($y, d.chart_data.yesterday);
-                printChart($m, d.chart_data.month);
-                printPieChart($p, d.post_pie || []);
-            },
-            error: function(xhr) { $('#panel-overview .access-skeleton').text(describeError(null, xhr)); }
+    function refererRows(list) {
+        if (!list || !list.length) { return '<tr><td colspan="3">暂无数据</td></tr>'; }
+        var html = '';
+        $.each(list, function(i, v) {
+            html += '<tr><td>' + (i+1) + '</td><td>' + escapeHtml(String(v.count))
+                 + '</td><td>' + escapeHtml(String(v.value)) + '</td></tr>';
         });
+        return html;
+    }
+
+    function sectionFailed(name, message) {
+        var sel = sectionTargets[name];
+        if (!sel) return;
+        if (name === 'referer') {
+            $('#referer-domain-body, #referer-url-body')
+                .html('<tr><td colspan="3">' + escapeHtml(message) + '</td></tr>');
+            return;
+        }
+        $(sel).each(function() {
+            var $el = $(this);
+            $el.removeClass('access-skeleton');
+            if ($el.is('td')) { $el.text('!'); } else { $el.text(message); }
+        });
+    }
+
+    function applySection(name, d) {
+        switch (name) {
+            case 'today':
+                $('#ov-today-pv').text(d.today.pv.count).removeClass('access-skeleton');
+                $('#ov-today-uv').text(d.today.uv.count).removeClass('access-skeleton');
+                $('#ov-today-ip').text(d.today.ip.count).removeClass('access-skeleton');
+                printChart($('#chart-today').removeClass('access-skeleton'), d.today);
+                break;
+            case 'yesterday':
+                $('#ov-yesterday-pv').text(d.yesterday.pv.count).removeClass('access-skeleton');
+                $('#ov-yesterday-uv').text(d.yesterday.uv.count).removeClass('access-skeleton');
+                $('#ov-yesterday-ip').text(d.yesterday.ip.count).removeClass('access-skeleton');
+                printChart($('#chart-yesterday').removeClass('access-skeleton'), d.yesterday);
+                break;
+            case 'total':
+                $('#ov-total-pv').text(d.total.pv).removeClass('access-skeleton');
+                $('#ov-total-uv').text(d.total.uv).removeClass('access-skeleton');
+                $('#ov-total-ip').text(d.total.ip).removeClass('access-skeleton');
+                break;
+            case 'referer':
+                $('#referer-domain-body').html(refererRows(d.referer && d.referer.domain));
+                $('#referer-url-body').html(refererRows(d.referer && d.referer.url));
+                break;
+            case 'pie':
+                printPieChart($('#chart-post-pie').removeClass('access-skeleton'), d.post_pie || []);
+                break;
+            case 'month':
+                if (d.done) {
+                    printChart($('#chart-month').removeClass('access-skeleton'), d.month);
+                } else {
+                    $('#chart-month').text('当月图表统计中… ' + (d.progress || 0) + ' / ' + (d.total_days || 0) + ' 天');
+                }
+                break;
+        }
+    }
+
+    function requestSection(name, token, attempt, done) {
+        $.ajax({
+            url: overviewApiUrl, method: 'get', dataType: 'json', timeout: 120000,
+            data: { section: name, seconds: 8 },
+            success: function(res) {
+                if (token !== overviewToken) return;          // 已被刷新作废
+                if (!res || res.code !== 0) {
+                    sectionFailed(name, describeError(res, null));
+                    return done();
+                }
+                applySection(name, res.data);
+                /* done === false 表示这一段还没算完（目前只有当月图表会这样），继续推进 */
+                if (res.data && res.data.done === false && attempt < 60) {
+                    return requestSection(name, token, attempt + 1, done);
+                }
+                if (res.data && res.data.done === false) {
+                    sectionFailed(name, '当月图表统计耗时过长，请稍后刷新继续。');
+                }
+                done();
+            },
+            error: function(xhr) {
+                if (token !== overviewToken) return;
+                sectionFailed(name, describeError(null, xhr));
+                done();
+            }
+        });
+    }
+
+    function loadOverview() {
+        overviewLoaded = true;
+        overviewToken++;
+        var token = overviewToken;
+        var queue = overviewSections.slice();
+
+        (function next() {
+            if (token !== overviewToken || !queue.length) return;
+            requestSection(queue.shift(), token, 0, next);
+        })();
     }
 
     /* ==================== 日志加载 ==================== */

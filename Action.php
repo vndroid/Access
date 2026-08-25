@@ -142,7 +142,17 @@ class Action extends Widget implements ActionInterface
     {
         $this->checkAuth();
         try {
-            $data = $this->getAccess()->getOverviewData();
+            $section = (string)$this->request->get('section', '');
+
+            if ($section === '') {
+                # 不带 section 时保持旧行为，一次返回全部
+                $data = $this->getAccess()->getOverviewData();
+            } else {
+                $seconds = (int)$this->request->get('seconds', 5);
+                $seconds = max(1, min($seconds, 15));
+                $data = $this->getAccess()->getOverviewSection($section, microtime(true) + $seconds);
+            }
+
             $response = [
                 'code' => 0,
                 'data' => $data,

@@ -39,6 +39,9 @@ class Core
     /** Redis 缓存键前缀 */
     private const CACHE_PREFIX = 'typecho_access:';
 
+    /** 历史日期的统计不会再变化，缓存 40 天足够覆盖当月图表 */
+    private const PAST_DAY_TTL = 3456000;
+
     public readonly UA $ua;
     public readonly Config $config;
     public readonly string $action;
@@ -113,6 +116,246 @@ class Core
             'chart_data' => json_decode($this->overview['chart_data'], true),
             'post_pie'   => $this->postPie,
         ];
+    }
+
+    /**
+     * 分段获取概览数据
+     *
+     * 数据量大时一次算完整个概览会超出 Web 超时（300 万行实测本地就要 6 秒），
+     * 而首次加载失败又会导致缓存永远建不起来，形成死循环。
+     * 这里把概览拆成几块分别请求，每块都足够小；算完的部分会写进缓存，
+     * 于是即使某一块要跑好几次也能逐步推进。
+     *
+     * @access public
+     * @param string $section today / yesterday / month / total / referer / pie
+     * @param float|null $deadline 时间预算（microtime 时间戳），仅 month 分段使用
+     * @return array
+     * @throws DbException
+     */
+    public function getOverviewSection(string $section, ?float $deadline = null): array
+    {
+        # 队列只在第一段刷一次就够，避免每段都刷
+        if ($section === 'today') {
+            $this->flushQueue();
+        }
+
+        return match ($section) {
+            'today' => [
+                'done' => true,
+                'today' => $this->chartOf($this->queryDayOverview(date('Y-m-d')), 'day'),
+            ],
+            'yesterday' => [
+                'done' => true,
+                'yesterday' => $this->chartOf($this->cachedDayOverview(date('Y-m-d', strtotime('-1 day'))), 'day'),
+            ],
+            'total' => [
+                'done' => true,
+                'total' => $this->cachedTotalOverview(),
+            ],
+            'month' => $this->monthSection($deadline),
+            'referer' => [
+                'done' => true,
+                'referer' => $this->refererData(),
+            ],
+            'pie' => [
+                'done' => true,
+                'post_pie' => $this->postPieData(),
+            ],
+            default => throw new \InvalidArgumentException('unknown section: ' . $section),
+        };
+    }
+
+    /**
+     * 概览分段的顺序，控制台按这个顺序逐个请求
+     *
+     * @return string[]
+     */
+    public static function overviewSections(): array
+    {
+        return ['today', 'yesterday', 'total', 'referer', 'pie', 'month'];
+    }
+
+    /**
+     * 补上图表需要的标题与横轴
+     *
+     * @access protected
+     * @param array $data
+     * @param string $kind day / month
+     * @return array
+     */
+    protected function chartOf(array $data, string $kind): array
+    {
+        $data['sub_title'] = 'Generate By AccessPlugin';
+        $count = count($data['ip']['detail'] ?? []);
+        if ($kind === 'day') {
+            $data['xAxis'] = range(0, $count);
+            $data['title'] = _t('%s 统计', $data['time']);
+        } else {
+            $data['xAxis'] = range(1, max(1, $count));
+            $data['title'] = _t('%s 月统计', $data['time']);
+        }
+        return $data;
+    }
+
+    /**
+     * 带缓存的单日概览（含小时明细）
+     * 历史日期的数据不会再变，可以长期缓存
+     *
+     * @access protected
+     * @param string $date
+     * @return array
+     * @throws DbException
+     */
+    protected function cachedDayOverview(string $date): array
+    {
+        $key = 'overview:dayfull:' . $date;
+        $cached = $this->getCache($key);
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $data = $this->queryDayOverview($date);
+        if ($date !== date('Y-m-d')) {
+            $this->setCache($key, $data, self::PAST_DAY_TTL);
+        }
+        return $data;
+    }
+
+    /**
+     * 带缓存的单日汇总（只要 ip/uv/pv 三个数，供月图表使用）
+     *
+     * @access protected
+     * @param string $date
+     * @return array
+     * @throws DbException
+     */
+    protected function cachedDayCounts(string $date): array
+    {
+        $key = 'overview:daycount:' . $date;
+        $cached = $this->getCache($key);
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $data = $this->queryDayCounts($date);
+        if ($date !== date('Y-m-d')) {
+            $this->setCache($key, $data, self::PAST_DAY_TTL);
+        }
+        return $data;
+    }
+
+    /**
+     * 带缓存的总计
+     *
+     * @access protected
+     * @return array
+     * @throws DbException
+     */
+    protected function cachedTotalOverview(): array
+    {
+        $cached = $this->getCache('overview:total');
+        if ($cached !== null) {
+            return $cached;
+        }
+        $data = $this->queryTotalOverview();
+        $this->setCache('overview:total', $data);
+        return $data;
+    }
+
+    /**
+     * 当月图表分段
+     *
+     * 逐天计算并逐天缓存。有 Redis 时支持时间预算：跑不完就先返回已完成的部分，
+     * 下次请求从缓存里直接拿到已算好的天数继续往下推进。
+     * 没有 Redis 时无处存放中间结果，只能一次算完。
+     *
+     * @access protected
+     * @param float|null $deadline
+     * @return array
+     * @throws DbException
+     */
+    protected function monthSection(?float $deadline): array
+    {
+        $year = date('Y');
+        $month = date('m');
+        $monthDays = (int)date('t');
+        $today = (int)date('j');
+
+        $result = ['time' => $month];
+        $ready = 0;
+        $computed = 0;
+        $done = true;
+
+        for ($day = 1; $day <= $monthDays; $day++) {
+            if ($day > $today) {
+                # 未来的日期直接补 0，不用查库
+                $result['ip']['detail'][$day - 1] = 0;
+                $result['uv']['detail'][$day - 1] = 0;
+                $result['pv']['detail'][$day - 1] = 0;
+                $ready++;
+                continue;
+            }
+
+            $date = sprintf('%s-%s-%02d', $year, $month, $day);
+            $cached = $this->getCache('overview:daycount:' . $date);
+            $counts = $cached ?? $this->cachedDayCounts($date);
+            if ($cached === null) {
+                $computed++;
+            }
+
+            $result['ip']['detail'][$day - 1] = $counts['ip'];
+            $result['uv']['detail'][$day - 1] = $counts['uv'];
+            $result['pv']['detail'][$day - 1] = $counts['pv'];
+            $ready++;
+
+            /*
+             * 只有能把中间结果缓存下来时，中断才有意义。
+             * 另外必须至少真算出了一天才允许中断：否则时间预算在「回放缓存」的阶段
+             * 就耗尽的话，每次请求都停在同一天，前端会一直请求却毫无进展。
+             */
+            if ($computed > 0 && $this->redis !== null && $deadline !== null
+                && $day < $today && microtime(true) >= $deadline) {
+                $done = false;
+                break;
+            }
+        }
+
+        if (!$done) {
+            return ['done' => false, 'progress' => $ready, 'total_days' => $monthDays];
+        }
+
+        return [
+            'done' => true,
+            'progress' => $ready,
+            'total_days' => $monthDays,
+            'month' => $this->chartOf($result, 'month'),
+        ];
+    }
+
+    /**
+     * 来源统计数据（供分段接口使用）
+     *
+     * @access protected
+     * @return array
+     * @throws DbException
+     */
+    protected function refererData(): array
+    {
+        $this->parseReferer();
+        return $this->referer;
+    }
+
+    /**
+     * 文章饼图数据（供分段接口使用）
+     *
+     * @access protected
+     * @return array
+     * @throws DbException
+     */
+    protected function postPieData(): array
+    {
+        $this->parsePostPie();
+        return $this->postPie;
     }
 
     /**
@@ -414,21 +657,22 @@ class Core
 
     /**
      * 写入 Redis 缓存
-     * TTL 统一为距明天 0 点的剩余秒数（86400 - 当天已过去的秒数）
+     * 默认 TTL 为距明天 0 点的剩余秒数，可显式指定（历史日期的统计永不变化，可以长期缓存）
      *
      * @access protected
      * @param string $key 缓存键名
      * @param array $data 缓存数据
+     * @param int|null $ttl 自定义存活秒数
      * @return void
      */
-    protected function setCache(string $key, array $data): void
+    protected function setCache(string $key, array $data, ?int $ttl = null): void
     {
         if ($this->redis === null) {
             return;
         }
 
         try {
-            $ttl = 86400 - (time() - strtotime(date("Y-m-d 00:00:00")));
+            $ttl = $ttl ?? (86400 - (time() - strtotime(date("Y-m-d 00:00:00"))));
             $this->redis->setex(
                 self::CACHE_PREFIX . $key,
                 max($ttl, 1),
@@ -621,30 +865,51 @@ class Core
         $result = ['time' => $month];
 
         for ($day = 1; $day <= $monthDays; $day++) {
-            $start = strtotime("{$year}-{$month}-{$day} 00:00:00");
-            $end   = strtotime("{$year}-{$month}-{$day} 23:59:59");
-
-            $subQuery = $this->db->select('DISTINCT ip')->from('table.access')
-                ->where('time >= ? AND time <= ?', $start, $end);
-            if (method_exists($subQuery, 'prepare')) {
-                $subQuery = $subQuery->prepare($subQuery);
-            }
-            $result['ip']['detail'][$day - 1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
-
-            $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')
-                ->where('time >= ? AND time <= ?', $start, $end);
-            if (method_exists($subQuery, 'prepare')) {
-                $subQuery = $subQuery->prepare($subQuery);
-            }
-            $result['uv']['detail'][$day - 1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
-
-            $result['pv']['detail'][$day - 1] = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
-                ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count'];
+            $counts = $this->queryDayCounts(sprintf('%s-%s-%02d', $year, $month, $day));
+            $result['ip']['detail'][$day - 1] = $counts['ip'];
+            $result['uv']['detail'][$day - 1] = $counts['uv'];
+            $result['pv']['detail'][$day - 1] = $counts['pv'];
         }
 
         return $result;
+    }
+
+    /**
+     * 查询某一天的汇总（只有 ip / uv / pv 三个数，不含小时明细）
+     *
+     * 这是概览里可以独立缓存的最小单元：历史日期算过一次就不会再变，
+     * 月图表按天拼装，因此某一天算不完也能在下一次请求继续。
+     *
+     * @access protected
+     * @param string $date 日期，格式 Y-m-d
+     * @return array {ip: int, uv: int, pv: int}
+     * @throws DbException
+     */
+    protected function queryDayCounts(string $date): array
+    {
+        $start = strtotime("{$date} 00:00:00");
+        $end   = strtotime("{$date} 23:59:59");
+
+        $subQuery = $this->db->select('DISTINCT ip')->from('table.access')
+            ->where('time >= ? AND time <= ?', $start, $end);
+        if (method_exists($subQuery, 'prepare')) {
+            $subQuery = $subQuery->prepare($subQuery);
+        }
+        $ip = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+            ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
+
+        $subQuery = $this->db->select('DISTINCT ip,ua')->from('table.access')
+            ->where('time >= ? AND time <= ?', $start, $end);
+        if (method_exists($subQuery, 'prepare')) {
+            $subQuery = $subQuery->prepare($subQuery);
+        }
+        $uv = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+            ->from('(' . $subQuery . ') AS tmp'))[0]['count'];
+
+        $pv = (int)$this->db->fetchAll($this->db->select('COUNT(1) AS count')
+            ->from('table.access')->where('time >= ? AND time <= ?', $start, $end))[0]['count'];
+
+        return ['ip' => $ip, 'uv' => $uv, 'pv' => $pv];
     }
 
     /**
