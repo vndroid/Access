@@ -45,7 +45,7 @@ class Plugin implements PluginInterface
     public static function activate(): string
     {
         if (PHP_VERSION_ID < 80200) {
-            throw new PluginException(_t('本插件需要 PHP 8.2 或更高版本，当前为 %s', PHP_VERSION));
+            throw new PluginException(_t('本插件需要满足 PHP 8.2+ 环境，当前为 %s', PHP_VERSION));
         }
         if (!extension_loaded('curl')) {
             throw new PluginException(_t('检测到当前 PHP 环境缺失 cURL 扩展'));
@@ -79,7 +79,7 @@ class Plugin implements PluginInterface
         $cleanFlag = false;
         $config = Options::alloc()->plugin(basename(__DIR__));
 
-        // 先把写入队列里积压的数据落库，避免随缓存一起被清掉
+        // 先把写入缓冲里积压的数据落库，避免随缓存一起被清掉
         try {
             (new Core())->flushQueue();
         } catch (\Throwable $e) {
@@ -225,18 +225,18 @@ class Plugin implements PluginInterface
             'writeQueue', [
                 '1' => '自动',
                 '0' => '禁用',
-            ], '1', '写入队列',
-            '在上面启用了「缓存加速」（即配置了 Redis）时，访问日志先写入 Redis 队列，'
-            . '攒够一批再一次性入库，可以显著降低突发流量下的数据库连接数与写入压力。'
-            . '未配置 Redis 时本项无效，写入行为与之前一致。'
+            ], '1', '写入缓冲',
+            '在启用了「缓存加速」时，访问日志先写入 Redis 队列，'
+            . '可以显著降低突发流量下的数据库连接数与写入压力，'
+            . '未配置 Redis 时本项自动禁用，写入行为与之前一致。'
         );
         $queueFlushSize = new Text(
-            'queueFlushSize', null, '500',
-            '队列刷新条数', '队列积压达到该条数时触发一次入库，默认 500'
+            'queueFlushSize', null, '100',
+            '队列刷新条数', '队列积压达到该条数时触发一次入库，默认为 100 条'
         );
         $queueFlushInterval = new Text(
             'queueFlushInterval', null, '60',
-            '队列刷新间隔', '距上次入库超过该秒数也会触发入库，避免低流量站点数据长时间滞留，默认 60'
+            '队列刷新间隔', '距上次入库超过阈值时间也会触发入库，避免低流量站点数据长时间滞留，默认 60 秒'
         );
         $dbType = new Select(
             'dbType', DbType::options(), DbType::Follow->value, '统计数据库',
@@ -421,7 +421,7 @@ class Plugin implements PluginInterface
 
             if ($external) {
                 # 把主库里已有的统计数据搬过去；每次进来都检查，
-                # 上次被超时截断的迁移会在这里自动接着做完
+                # 执行超时截断的迁移会自动重新迁移
                 $migration = Migrate::ensure(
                     $db,
                     Database::settings($settings),
