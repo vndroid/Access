@@ -97,6 +97,12 @@ class Plugin implements PluginInterface
             $db->query("DROP TABLE IF EXISTS {$table}", Db::WRITE);
             $cleanFlag = true;
         }
+        // 迁移标记存在独立的 options 行，禁用时一并清理
+        try {
+            Migrate::clearMark(Database::main());
+        } catch (\Throwable $e) {
+        }
+
         Helper::removePanel(1, self::$panel);
         Helper::removeRoute('access_ip_geo');
         Helper::removeRoute('access_track_flag');
@@ -155,6 +161,13 @@ class Plugin implements PluginInterface
      */
     public static function config(Form $form): void
     {
+        # 3.1.0 早期版本把迁移标记写进了插件配置，Typecho 渲染设置页时会拿它去找
+        # 同名表单控件从而报 Undefined array key，这里顺手清掉
+        try {
+            Migrate::cleanupLegacyMarker(Database::main());
+        } catch (\Throwable $e) {
+        }
+
         $pageSize = new Text(
             'pageSize', null, '20',
             '分页数量', '每页显示的日志数量'

@@ -39,8 +39,16 @@ final class Migrate
         'robot', 'robot_id', 'robot_version',
     ];
 
-    /** 迁移完成标记在插件配置中的键名 */
-    private const DONE_KEY = 'dbMigrateDone';
+    /**
+     * 迁移完成标记单独存一行 options，不能塞进 plugin:Access 的配置里：
+     * Typecho 渲染插件设置页时会遍历已保存的每个配置键去找对应表单控件
+     * （var/Widget/Plugins/Config.php: foreach ($options as $key => $val) $form->getInput($key)->value($val)），
+     * 没有声明成表单项的键会触发 Undefined array key 并对 null 调用方法。
+     */
+    private const DONE_OPTION = 'access_migrate_done';
+
+    /** 3.1.0 早期版本曾经把标记写在插件配置里，保留用于兼容与清理 */
+    private const LEGACY_DONE_KEY = 'dbMigrateDone';
 
     /**
      * 保证目标库的数据已经就位，需要时执行迁移
@@ -379,8 +387,25 @@ final class Migrate
      */
     public static function isMarked(Db $main, string $fingerprint): bool
     {
+        try {
+            $row = $main->fetchRow(
+                $main->select()->from('table.options')->where('name = ?', self::DONE_OPTION)
+            );
+            if (!empty($row) && (string)$row['value'] === $fingerprint) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+        }
+
+        # 兼容早期版本写在插件配置里的标记：命中就顺手搬到独立行并清掉旧键
         $settings = self::readPluginOptions($main);
-        return isset($settings[self::DONE_KEY]) && $settings[self::DONE_KEY] === $fingerprint;
+        if (isset($settings[self::LEGACY_DONE_KEY]) && $settings[self::LEGACY_DONE_KEY] === $fingerprint) {
+            self::mark($main, $fingerprint);
+            return true;
+        }
+
+        self::cleanupLegacyMarker($main);
+        return false;
     }
 
     /**
@@ -390,21 +415,70 @@ final class Migrate
     public static function mark(Db $main, string $fingerprint): void
     {
         try {
+            $exists = $main->fetchRow(
+                $main->select()->from('table.options')->where('name = ?', self::DONE_OPTION)
+            );
+
+            if (empty($exists)) {
+                $main->query($main->insert('table.options')
+                    ->rows(['name' => self::DONE_OPTION, 'user' => 0, 'value' => $fingerprint]));
+            } else {
+                $main->query($main->update('table.options')
+                    ->rows(['value' => $fingerprint])
+                    ->where('name = ?', self::DONE_OPTION));
+            }
+        } catch (\Throwable $e) {
+        }
+
+        self::cleanupLegacyMarker($main);
+    }
+
+    /**
+     * 删除迁移完成标记
+     */
+    public static function clearMark(Db $main): void
+    {
+        try {
+            $main->query($main->delete('table.options')->where('name = ?', self::DONE_OPTION));
+        } catch (\Throwable $e) {
+        }
+        self::cleanupLegacyMarker($main);
+    }
+
+    /**
+     * 清掉早期版本残留在插件配置里的标记键
+     *
+     * 留着它会让插件设置页每次渲染都报 Undefined array key，
+     * 因为它没有对应的表单控件。
+     *
+     * @param Db $main
+     * @return bool 是否确实清理了
+     */
+    public static function cleanupLegacyMarker(Db $main): bool
+    {
+        try {
             $row = $main->fetchRow(
                 $main->select()->from('table.options')->where('name = ?', 'plugin:Access')
             );
             if (empty($row)) {
-                return;
+                return false;
             }
-            $settings = json_decode($row['value'], true) ?: [];
-            $settings[self::DONE_KEY] = $fingerprint;
+
+            $settings = json_decode($row['value'], true);
+            if (!is_array($settings) || !array_key_exists(self::LEGACY_DONE_KEY, $settings)) {
+                return false;
+            }
+
+            unset($settings[self::LEGACY_DONE_KEY]);
             $main->query(
                 $main->update('table.options')
                     ->rows(['value' => json_encode($settings)])
                     ->where('name = ?', 'plugin:Access')
                     ->where('user = ?', $row['user'])
             );
+            return true;
         } catch (\Throwable $e) {
+            return false;
         }
     }
 
