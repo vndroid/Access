@@ -347,9 +347,28 @@ class Plugin implements PluginInterface
      */
     public static function configHandle(array $settings, bool $isInit): void
     {
-        # 插件启用时的初始化调用，此时 activate() 已经建过表，直接落库即可
+        /*
+         * 插件启用时的初始化调用，此时 activate() 已经建过表。
+         *
+         * 注意这里传进来的 $settings 是「表单控件的默认值」，不是任何人填过的东西：
+         * Typecho 在 activate() 返回之后会再走一遍
+         *     $form = new Form(); $class::config($form);
+         *     $class::configHandle($form->getValues(), true);
+         * （见 var/Widget/Plugins/Edit.php::activate）
+         * 照单全收的话，activate() 里刚从 config/current.yaml 写进去的配置
+         * 会在这一步被整个覆盖回默认值 —— 表建在了文件指定的库里，
+         * 配置却是默认的，表现就是「提示读到了配置文件，但设置没生效」。
+         *
+         * 所以这一步以配置文件为准，没有配置文件时才用传进来的默认值。
+         */
         if ($isInit) {
-            Edit::configPlugin('Access', $settings);
+            try {
+                $fromFile = Settings::load();
+            } catch (\Throwable $e) {
+                $fromFile = null;
+            }
+
+            Edit::configPlugin('Access', $fromFile ?? $settings);
             return;
         }
 
