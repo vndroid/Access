@@ -28,7 +28,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.1.1
+ * @version 3.1.2
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
@@ -53,7 +53,26 @@ class Plugin implements PluginInterface
         if (!extension_loaded('intl')) {
             throw new PluginException(_t('检测到当前 PHP 环境缺失 intl 扩展'));
         }
-        $msg = self::install();
+        # 有 config/current.yaml 就以它为准。注意这里只读文件，
+        # 把设置数组直接交给 install()——Options 组件在一次请求里只读一遍插件配置，
+        # 就算先写进 options 表它也看不到，建表仍会用旧的数据库设置。
+        [$applied, $configNote] = self::readFileConfig();
+
+        $msg = self::install($applied);
+
+        # 建表成功之后才把文件里的配置落库：
+        # 否则一份指向连不上的数据库的配置文件会在启用失败的同时覆盖掉原有配置
+        if ($applied !== null) {
+            try {
+                Edit::configPlugin(basename(__DIR__), $applied);
+            } catch (\Throwable $e) {
+                $configNote = _t('配置文件已生效但未能保存到数据库（%s）。', $e->getMessage());
+            }
+        }
+
+        if ($configNote !== '') {
+            $msg = $configNote . $msg;
+        }
         Helper::addPanel(1, self::$panel, _t('访问统计'), _t('统计控制台'), 'subscriber');
         Helper::addRoute('access_ip_geo', '/access/geo.json', '\TypechoPlugin\Access\Action', 'ipGeo');
         Helper::addRoute('access_track_flag', '/access/track/flag.gif', '\TypechoPlugin\Access\Action', 'writeLogs');
@@ -80,6 +99,10 @@ class Plugin implements PluginInterface
         $config = Options::alloc()->plugin(basename(__DIR__));
 
         // 先把写入缓冲里积压的数据落库，避免随缓存一起被清掉
+        // 把当前配置写回 config/current.yaml，下次启用时自动恢复。
+        // 写失败（目录只读等）不影响禁用流程
+        $saved = Settings::save($config);
+
         try {
             (new Core())->flushQueue();
         } catch (\Throwable $e) {
@@ -111,7 +134,12 @@ class Plugin implements PluginInterface
         Helper::removeRoute('access_logs_details');
         Helper::removeRoute('access_migrate');
 
-        return _t($cleanFlag ? '插件已禁用，数据表已清除' : '插件已禁用，数据表已保留');
+        $msg = $cleanFlag ? '插件已禁用，数据表已清除' : '插件已禁用，数据表已保留';
+        $msg .= $saved
+            ? _t('，当前配置已写入至 current.yaml 中')
+            : _t('，配置因目录或文件不可写未能写入');
+
+        return _t($msg);
     }
 
     /**
@@ -377,6 +405,27 @@ class Plugin implements PluginInterface
      * @throws DbException
      * @throws PluginException
      */
+    /**
+     * 启用时读取 config/current.yaml
+     *
+     * 文件不存在是常态，什么都不做；解析失败也不阻断启用，
+     * 只把原因带进启用成功的提示里，避免一个格式错误让插件装不上。
+     *
+     * @return array{0: array|null, 1: string} 读到的设置（没有则 null），以及要附加到启用提示前的说明
+     */
+    private static function readFileConfig(): array
+    {
+        try {
+            $settings = Settings::load();
+        } catch (\Throwable $e) {
+            return [null, _t('配置文件加载失败（%s），本次沿用已有配置。', $e->getMessage())];
+        }
+
+        return $settings === null
+            ? [null, '']
+            : [$settings, _t('已从 config/current.yaml 加载插件配置。')];
+    }
+
     public static function install(?array $settings = null): string
     {
         if (!str_ends_with(trim(__DIR__, '/\\'), 'Access')) {
