@@ -3,6 +3,7 @@
 namespace TypechoPlugin\Access;
 
 use Typecho\Db;
+use Typecho\Db\Adapter;
 
 if (!defined('__TYPECHO_ROOT_DIR__')) {
     exit;
@@ -16,22 +17,22 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  * - 批量 INSERT，一条语句写入多行，减少往返次数
  * - 可断点续传：源表主键原样保留到目标表，续传位置 = 目标表中不超过源表最大 id 的最大 id
  * - 迁移开始前先把目标表的自增起点抬到源表最大 id 之上，
- *   这样迁移期间新产生的日志不会和迁移中的主键撞车
+ *   这样迁移期间站点新产生的日志不会和迁移中的主键撞车
  * - 后台保存设置时只自动迁移小表，超过阈值改由命令行脚本执行，避免被 Web 超时截断
  */
-class Migrate
+final class Migrate
 {
     /** 后台自动迁移的行数上限，超过则提示改用命令行脚本 */
-    public const int AUTO_LIMIT = 50000;
+    public const AUTO_LIMIT = 50000;
 
     /** 每批处理的行数 */
-    public const int BATCH_SIZE = 1000;
+    public const BATCH_SIZE = 1000;
 
     /** 后台自动迁移的时间预算（秒），超时则中断并提示继续 */
-    public const int AUTO_DEADLINE = 20;
+    public const AUTO_DEADLINE = 20;
 
     /** 需要迁移的字段，顺序固定，避免两边表结构差异导致列错位 */
-    public const array COLUMNS = [
+    public const COLUMNS = [
         'id', 'ua', 'browser_id', 'browser_version', 'os_id', 'os_version',
         'url', 'path', 'query_string', 'ip', 'entrypoint', 'entrypoint_domain',
         'referer', 'referer_domain', 'time', 'content_id', 'meta_id',
@@ -39,7 +40,7 @@ class Migrate
     ];
 
     /** 迁移完成标记在插件配置中的键名 */
-    private const string DONE_KEY = 'dbMigrateDone';
+    private const DONE_KEY = 'dbMigrateDone';
 
     /**
      * 保证目标库的数据已经就位，需要时执行迁移
@@ -48,13 +49,13 @@ class Migrate
      * @param array $dbSettings Database::settings() 的结果
      * @param float|null $deadline 时间预算（microtime 时间戳），为 null 表示不限时
      * @return array {
-     *     status: already|none|done|partial|skipped,
-     *     moved: int, 已迁移行数, total: int 源表总行数, pending: int 剩余行数
+     *     status: MigrateStatus, moved: int 已迁移行数,
+     *     total: int 源表总行数, pending: int 剩余行数
      * }
      */
     public static function ensure(Db $target, array $dbSettings, ?float $deadline = null): array
     {
-        $result = ['status' => 'none', 'moved' => 0, 'total' => 0, 'pending' => 0];
+        $result = ['status' => MigrateStatus::None, 'moved' => 0, 'total' => 0, 'pending' => 0];
 
         try {
             $main = Database::main();
@@ -64,7 +65,7 @@ class Migrate
 
         $fingerprint = self::fingerprint($dbSettings);
         if (self::isMarked($main, $fingerprint)) {
-            $result['status'] = 'already';
+            $result['status'] = MigrateStatus::Already;
             return $result;
         }
 
@@ -86,13 +87,13 @@ class Migrate
 
         if ($pending === 0) {
             self::mark($main, $fingerprint);
-            $result['status'] = 'already';
+            $result['status'] = MigrateStatus::Already;
             return $result;
         }
 
         # 数据量过大时不在 Web 请求里做，交给命令行脚本
         if ($pending > self::AUTO_LIMIT) {
-            $result['status'] = 'skipped';
+            $result['status'] = MigrateStatus::Skipped;
             return $result;
         }
 
@@ -102,9 +103,9 @@ class Migrate
 
         if ($run['done']) {
             self::mark($main, $fingerprint);
-            $result['status'] = 'done';
+            $result['status'] = MigrateStatus::Done;
         } else {
-            $result['status'] = 'partial';
+            $result['status'] = MigrateStatus::Partial;
         }
 
         return $result;
@@ -171,7 +172,7 @@ class Migrate
 
         while (true) {
             $rows = $main->fetchAll(
-                call_user_func_array([$main, 'select'], self::COLUMNS)
+                $main->select(...self::COLUMNS)
                     ->from('table.access')
                     ->where('id > ?', $lastId)
                     ->where('id <= ?', $maxSourceId)
@@ -183,7 +184,7 @@ class Migrate
                 break;
             }
 
-            $moved += self::insertBatch($target, $rows);
+            $moved += self::insertBatch($target, $rows, self::COLUMNS);
             $lastId = (int)$rows[count($rows) - 1]['id'];
 
             if ($progress !== null) {
@@ -201,20 +202,35 @@ class Migrate
 
     /**
      * 批量写入一批数据，整批失败时退化为逐行写入，避免单条脏数据毁掉整批
+     * 迁移和写入队列共用这一段
      *
      * @param Db $target
      * @param array $rows
+     * @param array $columnList 要写入的字段，顺序固定
      * @return int 实际写入行数
      */
-    private static function insertBatch(Db $target, array $rows): int
+    public static function insertBatch(Db $target, array $rows, array $columnList): int
     {
-        $adapter = $target->getAdapter();
-        $table = $target->getPrefix() . 'access';
-        $columns = implode(', ', array_map([$adapter, 'quoteColumn'], self::COLUMNS));
+        if (empty($rows)) {
+            return 0;
+        }
 
-        $tuples = [];
-        foreach ($rows as $row) {
-            $tuples[] = self::tuple($adapter, $row);
+        try {
+            // quoteValue 依赖已经建立的连接，这里先确保连上，
+            // 否则在「刷库是本次请求第一个数据库操作」的场景下会取到未初始化的 PDO
+            $target->selectDb(Db::WRITE);
+
+            $adapter = $target->getAdapter();
+            $table = $target->getPrefix() . 'access';
+            $columns = implode(', ', array_map($adapter->quoteColumn(...), $columnList));
+
+            $tuples = [];
+            foreach ($rows as $row) {
+                $tuples[] = self::tuple($adapter, $row, $columnList);
+            }
+        } catch (\Throwable $e) {
+            // 连不上或拼不出语句，一条都没写进去
+            return 0;
         }
 
         try {
@@ -228,7 +244,7 @@ class Migrate
         foreach ($rows as $row) {
             try {
                 $target->query(
-                    "INSERT INTO {$table} ({$columns}) VALUES " . self::tuple($adapter, $row),
+                    "INSERT INTO {$table} ({$columns}) VALUES " . self::tuple($adapter, $row, $columnList),
                     Db::WRITE
                 );
                 $written++;
@@ -242,14 +258,15 @@ class Migrate
     /**
      * 按固定列顺序拼出一行的值
      *
-     * @param mixed $adapter
+     * @param Adapter $adapter
      * @param array $row
+     * @param array $columnList
      * @return string
      */
-    private static function tuple($adapter, array $row): string
+    private static function tuple(Adapter $adapter, array $row, array $columnList): string
     {
         $values = [];
-        foreach (self::COLUMNS as $column) {
+        foreach ($columnList as $column) {
             $value = $row[$column] ?? null;
             $values[] = $value === null ? 'NULL' : $adapter->quoteValue($value);
         }
@@ -269,27 +286,24 @@ class Migrate
         $table = $target->getPrefix() . 'access';
 
         try {
-            switch (Database::driver($target)) {
-                case 'pgsql':
-                    // 取序列现值与源表最大 id 的较大者，避免把已经领先的序列改小
-                    $target->query(
-                        "SELECT setval(pg_get_serial_sequence('{$table}', 'id'),
-                                GREATEST({$maxSourceId}, COALESCE((SELECT MAX(id) FROM {$table}), 0)), true)",
-                        Db::READ
-                    );
-                    break;
-                case 'mysql':
-                    // 小于当前最大值时 MySQL 会忽略该设置，是安全的
-                    $target->query("ALTER TABLE `{$table}` AUTO_INCREMENT = " . ($maxSourceId + 1), Db::WRITE);
-                    break;
-                case 'sqlite':
-                    $target->query(
-                        "INSERT OR REPLACE INTO sqlite_sequence(name, seq)
-                         VALUES('{$table}', MAX({$maxSourceId}, COALESCE((SELECT MAX(id) FROM `{$table}`), 0)))",
-                        Db::WRITE
-                    );
-                    break;
-            }
+            match (Database::driver($target)) {
+                // 取序列现值与源表最大 id 的较大者，避免把已经领先的序列改小
+                Driver::Pgsql => $target->query(
+                    "SELECT setval(pg_get_serial_sequence('{$table}', 'id'),
+                            GREATEST({$maxSourceId}, COALESCE((SELECT MAX(id) FROM {$table}), 0)), true)",
+                    Db::READ
+                ),
+                // 小于当前最大值时 MySQL 会忽略该设置，是安全的
+                Driver::Mysql => $target->query(
+                    "ALTER TABLE `{$table}` AUTO_INCREMENT = " . ($maxSourceId + 1),
+                    Db::WRITE
+                ),
+                Driver::Sqlite => $target->query(
+                    "INSERT OR REPLACE INTO sqlite_sequence(name, seq)
+                     VALUES('{$table}', MAX({$maxSourceId}, COALESCE((SELECT MAX(id) FROM `{$table}`), 0)))",
+                    Db::WRITE
+                ),
+            };
         } catch (\Throwable $e) {
         }
     }
@@ -352,7 +366,7 @@ class Migrate
     public static function fingerprint(array $dbSettings): string
     {
         return md5(implode('|', [
-            $dbSettings['type'] ?? '',
+            ($dbSettings['type'] ?? DbType::Follow)->value,
             $dbSettings['host'] ?? '',
             $dbSettings['port'] ?? '',
             $dbSettings['database'] ?? '',

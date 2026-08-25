@@ -2,6 +2,7 @@
 
 namespace TypechoPlugin\Access;
 
+use Typecho\Config;
 use Typecho\Db;
 use Widget\Options;
 
@@ -18,32 +19,17 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  * 注意：这里刻意不调用 Typecho\Db::set()，独立连接只在插件内部使用，
  * 不会影响 Typecho 本身以及其它插件。
  */
-class Database
+final class Database
 {
-    /** 跟随 Typecho 主库 */
-    public const FOLLOW = 'follow';
-
-    /** 支持的独立数据库类型 => Typecho 适配器名 */
-    public const ADAPTERS = [
-        'mysql' => 'Pdo_Mysql',
-        'pgsql' => 'Pdo_Pgsql',
-    ];
-
-    /** 各类型的默认端口 */
-    public const PORTS = [
-        'mysql' => 3306,
-        'pgsql' => 5432,
-    ];
-
     /** 已建立的独立连接，按配置指纹缓存，避免一次请求内重复连接 */
     private static array $pool = [];
 
     /**
      * 读取插件配置，未启用或未配置时返回 null
      *
-     * @return mixed
+     * @return Config|null
      */
-    public static function pluginConfig()
+    public static function pluginConfig(): ?Config
     {
         try {
             return Options::alloc()->plugin('Access');
@@ -55,11 +41,11 @@ class Database
     /**
      * 归一化数据库设置
      *
-     * @param mixed $source 配置来源，可以是保存配置时的 settings 数组、
-     *                      Typecho\Config 对象，为 null 时读取已保存的插件配置
+     * @param array|Config|null $source 配置来源，可以是保存配置时的 settings 数组、
+     *                                   Typecho\Config 对象，为 null 时读取已保存的插件配置
      * @return array
      */
-    public static function settings($source = null): array
+    public static function settings(array|Config|null $source = null): array
     {
         if ($source === null) {
             $source = self::pluginConfig();
@@ -79,47 +65,43 @@ class Database
             return $value === '' ? $default : $value;
         };
 
-        $type = strtolower($pick('dbType', self::FOLLOW));
-        if (!isset(self::ADAPTERS[$type])) {
-            $type = self::FOLLOW;
-        }
-
+        $type = DbType::parse($pick('dbType', DbType::Follow->value));
         $port = $pick('dbPort', '');
 
         return [
             'type'     => $type,
             'host'     => $pick('dbHost', '127.0.0.1'),
-            'port'     => $port === '' ? (self::PORTS[$type] ?? 3306) : (int)$port,
+            'port'     => $port === '' ? $type->defaultPort() : (int)$port,
             'user'     => $pick('dbUser', ''),
             'password' => $pick('dbPass', ''),
             'database' => $pick('dbName', ''),
             'prefix'   => $pick('dbPrefix', 'typecho_'),
-            'charset'  => $pick('dbCharset', $type === 'pgsql' ? 'utf8' : 'utf8mb4'),
+            'charset'  => $pick('dbCharset', $type->defaultCharset()),
         ];
     }
 
     /**
      * 是否配置了独立数据库
      *
-     * @param mixed $source
+     * @param array|Config|null $source
      * @return bool
      */
-    public static function isExternal($source = null): bool
+    public static function isExternal(array|Config|null $source = null): bool
     {
-        $settings = is_array($source) && isset($source['type']) ? $source : self::settings($source);
-        return $settings['type'] !== self::FOLLOW && $settings['database'] !== '';
+        $settings = self::normalized($source);
+        return $settings['type']->isExternal() && $settings['database'] !== '';
     }
 
     /**
      * 获取插件应当使用的数据库实例
      *
-     * @param mixed $source
+     * @param array|Config|null $source
      * @return Db
      * @throws \Typecho\Db\Exception
      */
-    public static function get($source = null): Db
+    public static function get(array|Config|null $source = null): Db
     {
-        $settings = is_array($source) && isset($source['type']) ? $source : self::settings($source);
+        $settings = self::normalized($source);
 
         if (!self::isExternal($settings)) {
             return self::main();
@@ -153,7 +135,7 @@ class Database
      */
     public static function connect(array $settings): Db
     {
-        $db = new Db(self::ADAPTERS[$settings['type']], $settings['prefix']);
+        $db = new Db($settings['type']->adapter(), $settings['prefix']);
         $db->addServer([
             'host'     => $settings['host'],
             'port'     => $settings['port'],
@@ -174,14 +156,14 @@ class Database
      */
     public static function test(array $settings): ?string
     {
-        if (!isset(self::ADAPTERS[$settings['type']])) {
+        if (!$settings['type']->isExternal()) {
             return _t('未知的数据库类型');
         }
         if ($settings['database'] === '') {
             return _t('请填写数据库名称');
         }
 
-        $extension = $settings['type'] === 'pgsql' ? 'pdo_pgsql' : 'pdo_mysql';
+        $extension = $settings['type']->extension();
         if (!extension_loaded($extension)) {
             return _t('当前 PHP 环境缺失 %s 扩展', $extension);
         }
@@ -199,18 +181,25 @@ class Database
      * 获取某个数据库实例的驱动类型
      *
      * @param Db $db
-     * @return string mysql / sqlite / pgsql
+     * @return Driver
      */
-    public static function driver(Db $db): string
+    public static function driver(Db $db): Driver
     {
-        $name = $db->getAdapterName();
-        if (str_contains($name, 'Pgsql')) {
-            return 'pgsql';
-        }
-        if (str_contains($name, 'SQLite')) {
-            return 'sqlite';
-        }
-        return 'mysql';
+        return Driver::fromAdapterName($db->getAdapterName());
+    }
+
+    /**
+     * 把各种形态的配置来源统一成归一化数组
+     * 已经归一化过的（'type' 是 DbType 实例）直接返回
+     *
+     * @param array|Config|null $source
+     * @return array
+     */
+    private static function normalized(array|Config|null $source): array
+    {
+        return is_array($source) && ($source['type'] ?? null) instanceof DbType
+            ? $source
+            : self::settings($source);
     }
 
     /**
@@ -223,19 +212,13 @@ class Database
     public static function tableExists(Db $db, string $table): bool
     {
         try {
-            switch (self::driver($db)) {
-                case 'pgsql':
-                    // current_schemas(false) 即当前 search_path，与未加限定的 CREATE TABLE 落点一致
-                    $sql = "SELECT tablename FROM pg_catalog.pg_tables
-                            WHERE schemaname = ANY (current_schemas(false)) AND tablename = '{$table}'";
-                    break;
-                case 'sqlite':
-                    $sql = "SELECT name FROM sqlite_master WHERE TYPE='table' AND name='{$table}'";
-                    break;
-                default:
-                    $sql = "SHOW TABLES LIKE '{$table}'";
-                    break;
-            }
+            $sql = match (self::driver($db)) {
+                // current_schemas(false) 即当前 search_path，与未加限定的 CREATE TABLE 落点一致
+                Driver::Pgsql => "SELECT tablename FROM pg_catalog.pg_tables
+                                  WHERE schemaname = ANY (current_schemas(false)) AND tablename = '{$table}'",
+                Driver::Sqlite => "SELECT name FROM sqlite_master WHERE TYPE='table' AND name='{$table}'",
+                Driver::Mysql => "SHOW TABLES LIKE '{$table}'",
+            };
             return !empty($db->fetchRow($db->query($sql, Db::READ)));
         } catch (\Throwable $e) {
             return false;

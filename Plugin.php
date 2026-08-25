@@ -44,6 +44,9 @@ class Plugin implements PluginInterface
      */
     public static function activate(): string
     {
+        if (PHP_VERSION_ID < 80200) {
+            throw new PluginException(_t('本插件需要 PHP 8.2 或更高版本，当前为 %s', PHP_VERSION));
+        }
         if (!extension_loaded('curl')) {
             throw new PluginException(_t('检测到当前 PHP 环境缺失 cURL 扩展'));
         }
@@ -76,6 +79,12 @@ class Plugin implements PluginInterface
         $cleanFlag = false;
         $config = Options::alloc()->plugin(basename(__DIR__));
 
+        // 先把写入队列里积压的数据落库，避免随缓存一起被清掉
+        try {
+            (new Core())->flushQueue();
+        } catch (\Throwable $e) {
+        }
+
         // 如果 Redis 缓存为启用状态，删除所有缓存键
         if (isset($config->redisCache) && $config->redisCache == '1' && extension_loaded('redis')) {
             self::clearRedisCache($config);
@@ -84,12 +93,8 @@ class Plugin implements PluginInterface
         if ($config->isDrop == 1) {
             // 数据表可能位于独立数据库中，这里要按插件实际使用的连接来删
             $db = Database::get();
-            $table = $db->getPrefix() . 'access';
-            // PostgreSQL 不支持反引号，且未加引号的标识符会被折叠为小写，与查询构造器的行为保持一致
-            $dropSql = Database::driver($db) === 'pgsql'
-                ? "DROP TABLE IF EXISTS {$table}"
-                : "DROP TABLE IF EXISTS `{$table}`";
-            $db->query($dropSql, Db::WRITE);
+            $table = Database::driver($db)->quoteTable($db->getPrefix() . 'access');
+            $db->query("DROP TABLE IF EXISTS {$table}", Db::WRITE);
             $cleanFlag = true;
         }
         Helper::removePanel(1, self::$panel);
@@ -189,7 +194,7 @@ class Plugin implements PluginInterface
                 '0' => '禁用',
                 '1' => '启用',
             ], '0', '缓存加速',
-            '启用后来源统计等慢查询结果会缓存至 Redis 服务中，提高加载速度'
+            '启用后来源统计等慢查询结果会缓存至 Redis，提高访问速度'
         );
         $redisHost = new Text(
             'redisHost', null, '127.0.0.1',
@@ -203,19 +208,35 @@ class Plugin implements PluginInterface
             'redisAuth', null, '',
             'Redis 认证', 'Redis 服务密码，默认留空无密码'
         );
+        $writeQueue = new Radio(
+            'writeQueue', [
+                '1' => '自动',
+                '0' => '禁用',
+            ], '1', '写入队列',
+            '在上面启用了「缓存加速」（即配置了 Redis）时，访问日志先写入 Redis 队列，'
+            . '攒够一批再一次性入库，可以显著降低突发流量下的数据库连接数与写入压力。'
+            . '未配置 Redis 时本项无效，写入行为与之前一致。'
+        );
+        $queueFlushSize = new Text(
+            'queueFlushSize', null, '500',
+            '队列刷新条数', '队列积压达到该条数时触发一次入库，默认 500'
+        );
+        $queueFlushInterval = new Text(
+            'queueFlushInterval', null, '60',
+            '队列刷新间隔', '距上次入库超过该秒数也会触发入库，避免低流量站点数据长时间滞留，默认 60'
+        );
         $dbType = new Select(
-            'dbType', [
-                Database::FOLLOW => '跟随主引擎',
-                'mysql' => 'MySQL / MariaDB',
-                'pgsql' => 'PostgreSQL',
-            ], Database::FOLLOW, '统计数据库',
-            '统计数据存放的位置。默认与博客共用一个库；'
+            'dbType', DbType::options(), DbType::Follow->value, '统计数据库',
+            '统计数据存放的位置。选择“跟随 Typecho”即与博客共用一个库；'
             . '选择其它类型则使用下方独立配置的数据库，保存设置时会自动建表，'
-            . '并把主库中已有的统计数据迁移过去。'
+            . '并把主库中已有的统计数据迁移过去。历史数据超过 '
+            . Migrate::AUTO_LIMIT . ' 条时不在保存设置时直接迁移，'
+            . '改为在统计控制台用进度条分批完成，也可以执行命令行脚本 '
+            . '<code>tools/migrate.php</code>，两者都支持断点续传。'
         );
         $dbHost = new Text(
             'dbHost', null, '127.0.0.1',
-            '统计数据库地址', '独立数据库的主机名或 IP，MySQL 也可填写 UNIX 套接字地址。仅在上方选择了独立数据库时生效'
+            '统计数据库地址', '独立数据库的主机名或 IP，MySQL 也可填写 unix socket 路径。仅在上方选择了独立数据库时生效'
         );
         $dbPort = new Text(
             'dbPort', null, '',
@@ -230,7 +251,7 @@ class Plugin implements PluginInterface
             '统计数据库密码', '连接独立数据库使用的密码，留空表示无密码'
         );
         $dbName = new Text(
-            'dbName', null, 'access',
+            'dbName', null, '',
             '统计数据库名称', '独立数据库的库名，选择独立数据库时必填（需要预先创建好，插件只负责建表）'
         );
         $dbPrefix = new Text(
@@ -239,7 +260,7 @@ class Plugin implements PluginInterface
         );
         $dbCharset = new Text(
             'dbCharset', null, '',
-            '统计数据库字符集', '留空则使用默认值（MySQL 为 utf8mb4，PostgreSQL 为 utf8）'
+            '统计数据库字符集', '留空则按类型使用默认值（MySQL utf8mb4，PostgreSQL utf8）'
         );
         $form->addInput($pageSize);
         $form->addInput($isDrop);
@@ -252,6 +273,9 @@ class Plugin implements PluginInterface
         $form->addInput($redisHost);
         $form->addInput($redisPort->addRule('isInteger', _t('端口必须为纯数字')));
         $form->addInput($redisAuth);
+        $form->addInput($writeQueue);
+        $form->addInput($queueFlushSize->addRule('isInteger', _t('刷新条数必须为纯数字')));
+        $form->addInput($queueFlushInterval->addRule('isInteger', _t('刷新间隔必须为纯数字')));
         $form->addInput($dbType);
         $form->addInput($dbHost);
         $form->addInput($dbPort);
@@ -294,7 +318,7 @@ class Plugin implements PluginInterface
 
         # 校验独立数据库配置，连不上就不保存，避免把插件配坏
         $dbSettings = Database::settings($settings);
-        if ($dbSettings['type'] !== Database::FOLLOW) {
+        if ($dbSettings['type']->isExternal()) {
             $error = Database::test($dbSettings);
             if ($error !== null) {
                 self::goBack(_t('统计数据库连接失败，配置未保存：%s', $error), 'error');
@@ -308,20 +332,21 @@ class Plugin implements PluginInterface
             $msg = self::install($settings);
         } catch (\Exception $e) {
             self::goBack(_t('插件设置已经保存，但初始化数据表失败：%s', $e->getMessage()), 'error');
-            return;
         }
 
         self::goBack(_t('插件设置已经保存。%s', $msg), 'success');
     }
 
     /**
-     * 设置提示信息并返回来源页面（会终止后续流程）
+     * 设置提示信息并返回来源页面
+     *
+     * respond() 会结束整个请求（sandbox 模式下以异常形式），所以这里永不返回
      *
      * @param string $message
      * @param string $type
-     * @return void
+     * @return never
      */
-    private static function goBack(string $message, string $type = 'notice'): void
+    private static function goBack(string $message, string $type = 'notice'): never
     {
         Notice::alloc()->set($message, $type);
         $referer = Request::getInstance()->getReferer();
@@ -354,26 +379,18 @@ class Plugin implements PluginInterface
 
         $driver = Database::driver($db);
         $prefix = $db->getPrefix();
-        $scriptFiles = [
-            'mysql'  => 'MySQL.sql',
-            'sqlite' => 'SQLite.sql',
-            'pgsql'  => 'PostgreSQL.sql',
-        ];
-        if (!isset($scriptFiles[$driver])) {
-            throw new PluginException(_t('当前适配器为%s，目前只支持 MySQL、SQLite 和 PostgreSQL', $db->getAdapterName()));
-        }
 
         $configLink = '<a href="' . Helper::options()->adminUrl('options-plugin.php?config=Access', true) . '">'
             . _t('前往设置') . '</a>';
         $where = $external
-            ? _t('（独立数据库 %s，表 %saccess）', strtoupper($driver), $prefix)
+            ? _t('（独立数据库 %s，表 %saccess）', strtoupper($driver->value), $prefix)
             : '';
 
         try {
             $created = false;
             if (!Database::tableExists($db, $prefix . 'access')) {
                 $scripts = file_get_contents(
-                    __TYPECHO_ROOT_DIR__ . __TYPECHO_PLUGIN_DIR__ . '/Access/sql/' . $scriptFiles[$driver]
+                    __TYPECHO_ROOT_DIR__ . __TYPECHO_PLUGIN_DIR__ . '/Access/sql/' . $driver->schemaFile()
                 );
                 $scripts = str_replace('typecho_', $prefix, $scripts);
                 $scripts = str_replace('%charset%', 'utf8mb4', $scripts);
@@ -391,7 +408,7 @@ class Plugin implements PluginInterface
 
             if ($external) {
                 # 把主库里已有的统计数据搬过去；每次进来都检查，
-                # 被超时截断的迁移会在这里自动接着做完
+                # 上次被超时截断的迁移会在这里自动接着做完
                 $migration = Migrate::ensure(
                     $db,
                     Database::settings($settings),
@@ -459,11 +476,8 @@ class Plugin implements PluginInterface
             }
         }
 
-        $legacy = $prefix . 'access_log';
-        $db->query(
-            Database::driver($db) === 'pgsql' ? "DROP TABLE {$legacy}" : "DROP TABLE `{$legacy}`",
-            Db::WRITE
-        );
+        $legacy = Database::driver($db)->quoteTable($prefix . 'access_log');
+        $db->query("DROP TABLE {$legacy}", Db::WRITE);
 
         return true;
     }
@@ -481,40 +495,36 @@ class Plugin implements PluginInterface
         $script = 'php ' . trim(__TYPECHO_PLUGIN_DIR__, '/') . '/Access/tools/migrate.php';
         $console = Helper::options()->adminUrl('extending.php?panel=' . urlencode(self::$panel), true);
 
-        switch ($migration['status']) {
-            case 'done':
-                return _t(
-                    '%s，已迁移 %s 条历史数据，插件启用成功，',
-                    $created ? _t('成功创建数据表%s', $where) : _t('数据表已经存在%s', $where),
-                    $migration['moved']
-                );
+        return match ($migration['status']) {
+            MigrateStatus::Done => _t(
+                '%s，已迁移 %s 条历史数据，插件启用成功，',
+                $created ? _t('成功创建数据表%s', $where) : _t('数据表已经存在%s', $where),
+                $migration['moved']
+            ),
 
-            case 'partial':
-                return _t(
-                    '数据表已就绪%s，本次迁移了 %s 条，还剩 %s 条未迁移。'
-                    . '请前往 <a href="%s">统计控制台</a> 用进度条继续迁移，'
-                    . '或在网站根目录执行 <code>%s</code>。两种方式都支持断点续传。',
-                    $where,
-                    $migration['moved'],
-                    $migration['pending'],
-                    $console,
-                    $script
-                );
+            MigrateStatus::Partial => _t(
+                '数据表已就绪%s，本次迁移了 %s 条，还剩 %s 条未迁移。'
+                . '请前往 <a href="%s">统计控制台</a> 用进度条继续迁移，'
+                . '或在网站根目录执行 <code>%s</code>。两种方式都支持断点续传。',
+                $where,
+                $migration['moved'],
+                $migration['pending'],
+                $console,
+                $script
+            ),
 
-            case 'skipped':
-                return _t(
-                    '数据表已就绪%s。主库中有 %s 条历史数据待迁移，数量较大未在保存设置时直接执行，'
-                    . '请前往 <a href="%s">统计控制台</a> 点击“开始迁移”，'
-                    . '或在网站根目录执行 <code>%s</code>。若不需要历史数据可忽略此提示。',
-                    $where,
-                    $migration['pending'],
-                    $console,
-                    $script
-                );
+            MigrateStatus::Skipped => _t(
+                '数据表已就绪%s。主库中有 %s 条历史数据待迁移，数量较大未在保存设置时直接执行，'
+                . '请前往 <a href="%s">统计控制台</a> 点击“开始迁移”，'
+                . '或在网站根目录执行 <code>%s</code>。若不需要历史数据可忽略此提示。',
+                $where,
+                $migration['pending'],
+                $console,
+                $script
+            ),
 
-            default:
-                return null;
-        }
+            MigrateStatus::None, MigrateStatus::Already => null,
+        };
     }
 
     /**

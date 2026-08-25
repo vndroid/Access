@@ -3,6 +3,7 @@
 namespace TypechoPlugin\Access;
 
 use Redis;
+use Typecho\Config;
 use Typecho\Cookie;
 use Typecho\Db;
 use Typecho\Db\Exception as DbException;
@@ -21,24 +22,27 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
 class Core
 {
     /** 统计数据所在的数据库，可能是 Typecho 主库，也可能是独立配置的库 */
-    protected Db $db;
+    protected readonly Db $db;
 
     /** Typecho 主库，用于读取文章标题等内容信息 */
-    protected Db $mainDb;
+    protected readonly Db $mainDb;
 
-    protected Request $request;
-    protected Response $response;
+    protected readonly Request $request;
+    protected readonly Response $response;
 
     /** Redis 缓存实例，未启用时为 null */
     protected ?Redis $redis = null;
 
+    /** 本次请求是否已经安排过刷库，避免重复注册 */
+    protected bool $flushScheduled = false;
+
     /** Redis 缓存键前缀 */
     private const CACHE_PREFIX = 'typecho_access:';
 
-    public UA $ua;
-    public $config;
-    public string $action;
-    public string $title;
+    public readonly UA $ua;
+    public readonly Config $config;
+    public readonly string $action;
+    public readonly string $title;
     public array $logs = [];
     public array $overview = [];
     public array $referer = [];
@@ -92,6 +96,9 @@ class Core
      */
     public function getOverviewData(): array
     {
+        # 先把队列里积压的写进去，否则控制台看到的数字会偏低
+        $this->flushQueue();
+
         $this->parseOverview();
         $this->parseReferer();
         $this->parsePostPie();
@@ -234,6 +241,9 @@ class Core
      */
     public function getLogsData(int $page, int $type, string $filter, string $filterValue): array
     {
+        # 先把队列里积压的写进去，否则最新的访问不会出现在列表里
+        $this->flushQueue();
+
         $offset = (max($page, 1) - 1) * $this->config->pageSize;
         $query = $this->db->select()->from('table.access')
             ->order('time', Db::SORT_DESC)
@@ -865,10 +875,96 @@ class Core
             'robot_version' => $this->ua->getRobotVersion(),
         ];
 
+        # 优先入队，攒批后统一落库；Redis 不可用或入队失败时退回直写
+        if (Queue::isEnabled($this->redis, $this->config) && Queue::push($this->redis, $rows)) {
+            $this->scheduleFlush();
+            return;
+        }
+
         try {
             $this->db->query($this->db->insert('table.access')->rows($rows));
         } catch (\Exception $e) {
         }
+    }
+
+    /**
+     * 达到阈值时安排一次刷库
+     *
+     * 刷库推迟到响应发出之后执行，承担这次刷库的访客感知不到延迟。
+     * 注意不能在这里直接调用 fastcgi_finish_request：writeLogs 是在页面渲染前
+     * 由 Widget\Archive::beforeRender 调用的，此时提前结束响应会让页面内容丢失，
+     * 所以统一放到 shutdown 阶段。
+     *
+     * @access protected
+     * @return void
+     */
+    protected function scheduleFlush(): void
+    {
+        if ($this->flushScheduled || $this->redis === null) {
+            return;
+        }
+
+        $size = (int)($this->config->queueFlushSize ?? 0);
+        $interval = (int)($this->config->queueFlushInterval ?? 0);
+        $size = $size > 0 ? $size : 500;
+        $interval = $interval > 0 ? $interval : 60;
+
+        if (!Queue::isDue($this->redis, $size, $interval)) {
+            return;
+        }
+        if (!Queue::acquireLock($this->redis)) {
+            // 已经有别的请求在刷了
+            return;
+        }
+
+        $this->flushScheduled = true;
+        $redis = $this->redis;
+        $db = $this->db;
+
+        register_shutdown_function(static function () use ($redis, $db) {
+            // 页面此时已经输出完毕，先把响应交给访客再慢慢写库
+            if (PHP_SAPI === 'fpm-fcgi' && function_exists('fastcgi_finish_request')) {
+                @fastcgi_finish_request();
+            }
+            @set_time_limit(0);
+            try {
+                Queue::flush($redis, $db);
+            } finally {
+                Queue::releaseLock($redis);
+            }
+        });
+    }
+
+    /**
+     * 同步刷一次队列，供控制台和命令行使用
+     *
+     * @access public
+     * @return int 写入行数
+     */
+    public function flushQueue(): int
+    {
+        if (!Queue::isEnabled($this->redis, $this->config)) {
+            return 0;
+        }
+        if (!Queue::acquireLock($this->redis)) {
+            return 0;
+        }
+        try {
+            return Queue::flush($this->redis, $this->db);
+        } finally {
+            Queue::releaseLock($this->redis);
+        }
+    }
+
+    /**
+     * 队列积压条数
+     *
+     * @access public
+     * @return int
+     */
+    public function queueLength(): int
+    {
+        return $this->redis === null ? 0 : Queue::length($this->redis);
     }
 
     /**
