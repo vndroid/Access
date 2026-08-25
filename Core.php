@@ -609,12 +609,22 @@ class Core
             return;
         }
 
+        /*
+         * 上次连接失败后的熔断窗口内直接降级，不再尝试。
+         * Redis 不可达时连接会一直等到超时，而本类是在每个前台请求里构造的，
+         * 没有这道闸门的话每个访客都要白等一次。
+         */
+        if (Health::tripped(Health::REDIS)) {
+            return;
+        }
+
         try {
             $redis = new Redis();
             $host = $this->config->redisHost ?: '127.0.0.1';
             $port = (int)($this->config->redisPort ?: 6379);
 
-            if (!$redis->connect($host, $port, 3)) {
+            if (!$redis->connect($host, $port, Health::CONNECT_TIMEOUT)) {
+                Health::trip(Health::REDIS);
                 return;
             }
 
@@ -625,7 +635,10 @@ class Core
 
             $redis->ping();
             $this->redis = $redis;
+            # 连上了就立刻解除熔断，Redis 恢复后不用等窗口自然过期
+            Health::clear(Health::REDIS);
         } catch (\Throwable $e) {
+            Health::trip(Health::REDIS);
             $this->redis = null;
         }
     }

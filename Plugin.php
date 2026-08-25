@@ -28,7 +28,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.1.2
+ * @version 3.1.3
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
@@ -73,6 +73,10 @@ class Plugin implements PluginInterface
         if ($configNote !== '') {
             $msg = $configNote . $msg;
         }
+
+        # 配置里启用了 Redis 就在这里探测一次
+        $msg .= self::probeRedis($applied);
+
         Helper::addPanel(1, self::$panel, _t('访问统计'), _t('统计控制台'), 'subscriber');
         Helper::addRoute('access_ip_geo', '/access/geo.json', '\TypechoPlugin\Access\Action', 'ipGeo');
         Helper::addRoute('access_track_flag', '/access/track/flag.gif', '\TypechoPlugin\Access\Action', 'writeLogs');
@@ -155,7 +159,7 @@ class Plugin implements PluginInterface
             $host = $config->redisHost ?: '127.0.0.1';
             $port = (int)($config->redisPort ?: 6379);
 
-            if (!$redis->connect($host, $port, 3)) {
+            if (!$redis->connect($host, $port, Health::CONNECT_TIMEOUT)) {
                 return;
             }
 
@@ -394,6 +398,9 @@ class Plugin implements PluginInterface
             self::goBack(_t('插件设置已经保存，但初始化数据表失败：%s', $e->getMessage()), 'error');
         }
 
+        # 顺带探测一次 Redis，避免在后台改完设置却毫无反馈
+        $msg .= self::probeRedis($settings);
+
         self::goBack(_t('插件设置已经保存。%s', $msg), 'success');
     }
 
@@ -424,6 +431,44 @@ class Plugin implements PluginInterface
      * @throws DbException
      * @throws PluginException
      */
+    /**
+     * 探测配置里的 Redis 是否可用
+     *
+     * Redis 只是加速器，连不上不该拦住插件启用 —— 缓存与写入队列会自动降级，
+     * 统计功能是完整的。但探测本身有价值：它把「不可达」这个事实记进熔断器，
+     * 于是接下来的前台请求直接走降级路径，不必每个访客各撞一次连接超时。
+     *
+     * @param array|null $applied 本次从配置文件读到的设置，为 null 时读数据库里已保存的
+     * @return string 附加到启用提示后面的说明，正常时为空串
+     */
+    private static function probeRedis(?array $applied): string
+    {
+        $config = $applied;
+        if ($config === null) {
+            try {
+                $config = Options::alloc()->plugin(basename(__DIR__));
+            } catch (\Throwable $e) {
+                return '';
+            }
+        }
+
+        if (Health::redisTarget($config) === null) {
+            # 没启用缓存加速，没什么可探测的
+            return '';
+        }
+
+        $error = Health::probeRedis($config);
+        if ($error === null) {
+            return '';
+        }
+
+        return _t(
+            '（注意：已配置 Redis 但当前不可用 —— %s，缓存与写入队列已自动降级，统计功能不受影响；'
+            . '恢复后无需改动，插件会自动重新连接。）',
+            $error
+        );
+    }
+
     /**
      * 启用时读取 config/current.yaml
      *

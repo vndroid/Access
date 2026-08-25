@@ -270,7 +270,7 @@ final class Settings
             '# 注意：本文件含有数据库密码、Redis 密码、接口令牌等敏感信息，',
             '# 权限已设为 0600，请勿提交到公开仓库，也不要放到可被下载的位置。',
             '#',
-            '# 生成时间：' . date('Y-m-d H:i:s'),
+            '# 生成时间：' . self::now(),
             '',
             self::ROOT_KEY . ':',
         ];
@@ -283,6 +283,35 @@ final class Settings
         }
 
         return implode("\n", $lines) . "\n";
+    }
+
+    /**
+     * 当前时间，按站点配置的时区
+     *
+     * 直接用 date() 拿到的是 PHP 进程的时区（容器里通常是 UTC），
+     * 和后台各处显示的时间对不上，看文件的人会以为时间错了。
+     * 这里跟 Typecho 自己一样按站点时区折算，并把偏移量一并写出来，
+     * 免得脱离站点看这个文件时还要猜。
+     *
+     * @return string
+     */
+    private static function now(): string
+    {
+        try {
+            $options = \Widget\Options::alloc();
+            $offset = (int)$options->timezone;
+            # gmtTime 是 GMT 时间戳，加上站点偏移后用 gmdate 格式化，避免再叠一次进程时区
+            $stamp = (int)$options->gmtTime + $offset;
+
+            return gmdate('Y-m-d H:i:s', $stamp) . sprintf(
+                ' UTC%s%02d:%02d',
+                $offset < 0 ? '-' : '+',
+                intdiv(abs($offset), 3600),
+                intdiv(abs($offset) % 3600, 60)
+            );
+        } catch (\Throwable $e) {
+            return date('Y-m-d H:i:s');
+        }
     }
 
     /**
