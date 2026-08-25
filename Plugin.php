@@ -142,7 +142,7 @@ class Plugin implements PluginInterface
             }
 
             $redis->close();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             // 清除失败不影响禁用流程
         }
     }
@@ -330,7 +330,7 @@ class Plugin implements PluginInterface
         # 配置保存后，按新的数据库设置建表并迁移历史数据
         try {
             $msg = self::install($settings);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             self::goBack(_t('插件设置已经保存，但初始化数据表失败：%s', $e->getMessage()), 'error');
         }
 
@@ -373,7 +373,7 @@ class Plugin implements PluginInterface
         $external = Database::isExternal($settings);
         try {
             $db = Database::get($settings);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             throw new PluginException(_t('无法连接到配置的统计数据库，错误信息：%s。', $e->getMessage()));
         }
 
@@ -430,7 +430,7 @@ class Plugin implements PluginInterface
             throw $e;
         } catch (DbException $e) {
             throw new PluginException(_t('数据表建立失败，插件启用失败，错误信息：%s。', $e->getMessage()));
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             throw new PluginException($e->getMessage());
         }
     }

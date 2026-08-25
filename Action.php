@@ -13,6 +13,14 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
 
 class Action extends Widget implements ActionInterface
 {
+    /*
+     * 注意：这里一律 catch \Throwable 而不是 \Exception。
+     * Typecho 的 PDO 适配器把 PDOException 的 SQLSTATE 当成 int 传给 Exception 构造函数，
+     * 而 PostgreSQL 的部分 SQLSTATE 含字母（如 42P01 表不存在），会先抛出 TypeError。
+     * TypeError 属于 \Error，只 catch \Exception 会让它逃逸成 PHP 致命错误，
+     * 响应体为空，前端只能看到「无法获取」而拿不到真正的错误信息。
+     */
+
     private ?Core $access = null;
 
     private function getAccess(): Core
@@ -92,7 +100,7 @@ class Action extends Widget implements ActionInterface
                     'i18n' => null,
                 ];
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $response = [
                 'code' => 500,
                 'data' => $e->getMessage(),
@@ -117,7 +125,7 @@ class Action extends Widget implements ActionInterface
             $response = [
                 'code' => 0,
             ];
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $response = [
                 'code' => 100,
                 'data' => $e->getMessage(),
@@ -139,10 +147,10 @@ class Action extends Widget implements ActionInterface
                 'code' => 0,
                 'data' => $data,
             ];
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $response = [
                 'code' => 500,
-                'data' => $e->getMessage(),
+                'data' => Database::explainError($e),
             ];
         }
 
@@ -170,10 +178,10 @@ class Action extends Widget implements ActionInterface
                 'code' => 0,
                 'data' => $data,
             ];
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $response = [
                 'code' => 500,
-                'data' => $e->getMessage(),
+                'data' => Database::explainError($e),
             ];
         }
 
@@ -234,7 +242,7 @@ class Action extends Widget implements ActionInterface
             }
 
             $response = ['code' => 0, 'data' => $data];
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $response = ['code' => 500, 'data' => $e->getMessage()];
         }
 

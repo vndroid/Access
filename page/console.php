@@ -263,19 +263,28 @@ include 'table-js.php';
     let initAction     = '<?php echo $initAction; ?>';
 
     /* ==================== 工具函数 ==================== */
+    /* 把接口返回的真实错误信息显示出来，而不是一句「加载失败」 */
+    function describeError(res, xhr) {
+        if (res && res.code !== 0 && res.data) {
+            return '加载失败：' + String(res.data);
+        }
+        if (xhr && xhr.status === 403) {
+            return '加载失败：没有权限，请确认已用管理员账号登录';
+        }
+        if (xhr && xhr.status === 404) {
+            return '加载失败：接口未注册，请在插件管理中禁用并重新启用 Access 插件';
+        }
+        if (xhr && xhr.status) {
+            return '加载失败：服务器返回 HTTP ' + xhr.status
+                 + (xhr.status >= 500 ? '（多为 PHP 致命错误，请查看 PHP 错误日志）' : '');
+        }
+        return '加载失败：请求未能完成';
+    }
+
     function escapeHtml(str) {
         let div = document.createElement('div');
         div.appendChild(document.createTextNode(str));
         return div.innerHTML;
-    }
-
-    function isSafeExternalUrl(value) {
-        try {
-            let url = new URL(value);
-            return url.protocol === 'http:' || url.protocol === 'https:';
-        } catch (e) {
-            return false;
-        }
     }
 
     function formatDate(ts) {
@@ -377,7 +386,10 @@ include 'table-js.php';
         $.ajax({
             url: overviewApiUrl, method: 'get', dataType: 'json',
             success: function(res) {
-                if (res.code !== 0) { $('#panel-overview .access-skeleton').text('加载失败'); return; }
+                if (res.code !== 0) {
+                    $('#panel-overview .access-skeleton').text(describeError(res, null));
+                    return;
+                }
                 overviewLoaded = true;
                 var d = res.data;
 
@@ -416,7 +428,7 @@ include 'table-js.php';
                 printChart($m, d.chart_data.month);
                 printPieChart($p, d.post_pie || []);
             },
-            error: function() { $('#panel-overview .access-skeleton').text('加载失败'); }
+            error: function(xhr) { $('#panel-overview .access-skeleton').text(describeError(null, xhr)); }
         });
     }
 
@@ -435,7 +447,10 @@ include 'table-js.php';
         $.ajax({
             url: logsApiUrl, method: 'get', dataType: 'json', data: params,
             success: function(res) {
-                if (res.code !== 0) { $('#logs-table-body').html('<tr><td colspan="6">加载失败</td></tr>'); return; }
+                if (res.code !== 0) {
+                    $('#logs-table-body').html('<tr><td colspan="6">' + escapeHtml(describeError(res, null)) + '</td></tr>');
+                    return;
+                }
                 logsLoaded = true;
                 var d = res.data;
 
@@ -464,12 +479,7 @@ include 'table-js.php';
                             html += ' <a href="#" class="logs-filter-link right-aligned" data-filter="ip" data-value="' + escapeHtml(String(ip)) + '">[?]</a>';
                         }
                         html += '</td>';
-                        let referer = String(log.referer || '');
-                        if (isSafeExternalUrl(referer)) {
-                            html += '<td><a target="_blank" rel="noopener noreferrer" href="' + escapeHtml(referer) + '">' + escapeHtml(referer) + '</a></td>';
-                        } else {
-                            html += '<td>' + escapeHtml(referer) + '</td>';
-                        }
+                        html += '<td><a target="_blank" href="' + escapeHtml(String(log.referer)) + '">' + escapeHtml(String(log.referer)) + '</a></td>';
                         html += '<td>' + formatDate(log.time) + '</td>';
                         html += '</tr>';
                     });
@@ -484,7 +494,7 @@ include 'table-js.php';
                 bindLogEvents();
                 bindLogsInlineLinks();
             },
-            error: function() { $('#logs-table-body').html('<tr><td colspan="6">加载失败</td></tr>'); }
+            error: function(xhr) { $('#logs-table-body').html('<tr><td colspan="6">' + escapeHtml(describeError(null, xhr)) + '</td></tr>'); }
         });
     }
 

@@ -382,7 +382,7 @@ class Core
 
             $redis->ping();
             $this->redis = $redis;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->redis = null;
         }
     }
@@ -407,7 +407,7 @@ class Core
             }
             $decoded = json_decode($data, true);
             return is_array($decoded) ? $decoded : null;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return null;
         }
     }
@@ -434,7 +434,7 @@ class Core
                 max($ttl, 1),
                 json_encode($data, JSON_UNESCAPED_UNICODE)
             );
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             // 写入失败静默忽略，不影响主流程
         }
     }
@@ -616,7 +616,8 @@ class Core
     {
         $year  = date('Y');
         $month = date('m');
-        $monthDays = cal_days_in_month(CAL_GREGORIAN, (int)$month, (int)$year);
+        // 用 date('t') 而不是 cal_days_in_month()，后者需要 calendar 扩展，结果完全一致
+        $monthDays = (int)date('t', mktime(0, 0, 0, (int)$month, 1, (int)$year));
         $result = ['time' => $month];
 
         for ($day = 1; $day <= $monthDays; $day++) {
@@ -883,7 +884,7 @@ class Core
 
         try {
             $this->db->query($this->db->insert('table.access')->rows($rows));
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
         }
     }
 

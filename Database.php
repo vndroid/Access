@@ -33,7 +33,7 @@ final class Database
     {
         try {
             return Options::alloc()->plugin('Access');
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return null;
         }
     }
@@ -200,6 +200,59 @@ final class Database
         return is_array($source) && ($source['type'] ?? null) instanceof DbType
             ? $source
             : self::settings($source);
+    }
+
+    /**
+     * 把异常翻译成对使用者有意义的说明
+     *
+     * Typecho 的 PDO 适配器（var/Typecho/Db/Adapter/Pdo.php）在捕获 PDOException 后写的是
+     * `throw new SQLException($e->getMessage(), $e->getCode())`，而 PDOException::getCode()
+     * 返回的是 SQLSTATE 字符串。PostgreSQL 有一部分 SQLSTATE 含字母（最常见的是 42P01
+     * 「表不存在」），传给要求 int 的 Exception 构造函数会先抛 TypeError，
+     * 真正的数据库错误信息就此丢失。这里识别出这种情况后主动探测一次，给出可操作的结论。
+     *
+     * @param \Throwable $e
+     * @param Db|null $db 出问题的连接，为 null 时按当前配置解析
+     * @return string
+     */
+    public static function explainError(\Throwable $e, ?Db $db = null): string
+    {
+        $message = $e->getMessage();
+
+        if (!$e instanceof \TypeError || !str_contains($message, 'Exception::__construct()')) {
+            return $message;
+        }
+
+        $hint = _t('数据库报错，但当前 Typecho 版本的 PDO 适配器把原始错误信息丢失了。');
+
+        try {
+            $settings = self::settings();
+            if ($settings['type']->isExternal()) {
+                $error = self::test($settings);
+                if ($error !== null) {
+                    return $hint . _t('探测：无法连接统计数据库 —— %s', $error);
+                }
+            }
+
+            $db = $db ?? self::get();
+            $table = $db->getPrefix() . 'access';
+
+            if (!self::tableExists($db, $table)) {
+                return $hint . _t(
+                    '探测：统计数据库中找不到数据表 %s。请到插件设置页重新保存一次设置以建表，'
+                    . '并确认「统计数据表前缀」与实际表名一致。',
+                    $table
+                );
+            }
+
+            return $hint . _t(
+                '探测：数据表 %s 存在且可连接，请检查该表字段是否完整（可对照 sql/PostgreSQL.sql），'
+                . '以及连接账号是否有足够权限。',
+                $table
+            );
+        } catch (\Throwable $probe) {
+            return $hint . _t('探测本身也失败了：%s', $probe->getMessage());
+        }
     }
 
     /**
