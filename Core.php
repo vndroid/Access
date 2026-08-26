@@ -1229,7 +1229,8 @@ class Core
             return 0;
         }
         try {
-            return Queue::flush($this->redis, $this->db);
+            # 这里只关心写入行数；完整的 attempted/invalid/rejected/stopped 见 Queue::flush()
+            return Queue::flush($this->redis, $this->db)['written'];
         } finally {
             Queue::releaseLock($this->redis);
         }

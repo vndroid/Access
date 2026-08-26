@@ -13,7 +13,8 @@
  *
  * 可选参数：
  *   --root=/path/to/typecho   指定 Typecho 根目录（默认自动向上查找 config.inc.php）
- *   --limit=5000              本次最多写入多少条，默认 5000
+ *   --limit=5000              本次最多处理多少条，默认 5000
+ *   --deadline=20             本次最多跑多少秒，默认 20，到点收工剩下的留给下一次
  *   --quiet                   没有积压时不输出任何内容，适合 cron
  */
 
@@ -122,21 +123,45 @@ try {
 
     $db = Database::get($settings);
     $limit = isset($argvOptions['limit']) ? (int)$argvOptions['limit'] : Queue::FLUSH_LIMIT;
+    $seconds = isset($argvOptions['deadline']) ? (int)$argvOptions['deadline'] : Queue::FLUSH_DEADLINE;
+    $seconds = max(1, $seconds);
     $startedAt = microtime(true);
 
     try {
-        $written = Queue::flush($redis, $db, $limit);
+        $result = Queue::flush($redis, $db, $limit, $startedAt + $seconds);
     } finally {
         Queue::releaseLock($redis);
     }
 
     $remaining = Queue::length($redis);
     printf(
-        "已写入 %s 条，耗时 %.2f 秒，队列剩余 %s 条。\n",
-        number_format($written),
+        "已处理 %s 条（写入 %s 条），耗时 %.2f 秒，队列剩余 %s 条。\n",
+        number_format($result['attempted']),
+        number_format($result['written']),
         microtime(true) - $startedAt,
         number_format($remaining)
     );
+
+    # attempted 与 written 的差额都是被丢弃的数据，必须说清楚去向
+    if ($result['invalid'] > 0 || $result['rejected'] > 0) {
+        printf(
+            "其中 %s 条 JSON 无法解析、%s 条被数据库拒绝，已从队列中丢弃。\n",
+            number_format($result['invalid']),
+            number_format($result['rejected'])
+        );
+    }
+
+    $note = match ($result['stopped']) {
+        'limit'    => sprintf('本次达到条数上限 %s，剩余部分请再次执行。', number_format($limit)),
+        'deadline' => sprintf('本次达到时间上限 %d 秒，剩余部分请再次执行。', $seconds),
+        'db'       => $result['error'],
+        'error'    => '刷库中断：' . $result['error'],
+        default    => '',
+    };
+    if ($note !== '') {
+        echo $note . "\n";
+    }
+
     $redis->close();
 } catch (\Throwable $e) {
     fwrite(STDERR, '刷库失败：' . $e->getMessage() . "\n");

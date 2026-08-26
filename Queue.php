@@ -44,6 +44,15 @@ final class Queue
     /** 单次刷库最多处理多少条，防止一次请求耗时过长 */
     public const FLUSH_LIMIT = 5000;
 
+    /**
+     * 单次刷库的墙钟上限（秒）
+     *
+     * 条数上限挡不住「每条都很慢」的情况：数据库变慢、批量 INSERT 反复退化成逐行时，
+     * 5000 条也可能跑上好几分钟，而刷库锁的存活时间只有 LOCK_TTL 秒。
+     * 这里再加一道时间闸门，超时就收工，剩下的留给下一次。
+     */
+    public const FLUSH_DEADLINE = 20;
+
     /** 入队字段，顺序固定；与 Migrate::COLUMNS 相同但不含自增主键 */
     public const COLUMNS = [
         'ua', 'browser_id', 'browser_version', 'os_id', 'os_version',
@@ -179,25 +188,55 @@ final class Queue
     /**
      * 把队列里的数据落库
      *
-     * 先读后删：写库成功才把这批从队列里裁掉，写失败数据仍留在队列中等下次重试。
-     * 极端情况下（写库成功但裁剪前进程被杀）会有少量重复，对访问统计可以接受。
+     * 先读后删：整批一条都写不进去时保留队列不裁剪，等下次重试，宁可重复也不丢数据；
+     * 数据库是通的、只有个别行写不进去（脏数据）时才连同它们一起裁掉，避免永远堵住队列。
+     *
+     * 上限按「从队列取走的条数」(attempted) 计算，而不是按写入成功数：
+     * 否则一批消息大部分写失败时 written 不增长，循环会继续吃下去，
+     * 极端情况（整个队列都是坏 JSON）下单次调用会一路处理完 MAX_LENGTH 条，
+     * 彻底失去时间边界。
      *
      * @param Redis $redis
      * @param Db $db 统计数据所在的数据库
-     * @param int $limit 本次最多写入多少条，0 表示用默认上限
-     * @return int 实际写入行数
+     * @param int $limit 本次最多处理多少条，0 表示用默认上限
+     * @param float|null $deadline 墙钟截止时间（microtime 时间戳），null 表示用默认预算
+     * @return array{attempted:int,written:int,invalid:int,rejected:int,stopped:string,error:?string}
+     *         attempted 取走并裁掉的消息数；written 实际入库行数；
+     *         invalid  JSON 解析失败被丢弃的条数；rejected 数据库逐行重试仍写不进去被丢弃的条数；
+     *         恒有 invalid + rejected === attempted - written。
+     *         stopped 为结束原因：
+     *           empty    队列已取空（正常结束）
+     *           limit    达到条数上限，队列中仍有积压
+     *           deadline 达到时间上限，队列中仍有积压
+     *           db       数据库不可用，本批已保留在队列中等待重试
+     *           error    Redis 或其它异常，详见 error
      */
-    public static function flush(Redis $redis, Db $db, int $limit = 0): int
+    public static function flush(Redis $redis, Db $db, int $limit = 0, ?float $deadline = null): array
     {
         $limit = $limit > 0 ? $limit : self::FLUSH_LIMIT;
+        $deadline = $deadline ?? (microtime(true) + self::FLUSH_DEADLINE);
         $batchSize = Migrate::BATCH_SIZE;
-        $written = 0;
+
+        $result = [
+            'attempted' => 0,
+            'written'   => 0,
+            'invalid'   => 0,
+            'rejected'  => 0,
+            'stopped'   => 'empty',
+            'error'     => null,
+        ];
 
         try {
-            while ($written < $limit) {
-                $take = min($batchSize, $limit - $written);
+            while ($result['attempted'] < $limit) {
+                if (microtime(true) >= $deadline) {
+                    $result['stopped'] = 'deadline';
+                    break;
+                }
+
+                $take = min($batchSize, $limit - $result['attempted']);
                 $items = $redis->lRange(self::KEY, 0, $take - 1);
                 if (empty($items)) {
+                    $result['stopped'] = 'empty';
                     break;
                 }
 
@@ -215,25 +254,40 @@ final class Queue
                 if ($ok === 0 && !empty($rows)) {
                     // 一条都没写进去，基本可以断定是数据库不可用；
                     // 保留队列不裁剪，等下一次刷库重试，宁可重复也不丢数据
+                    $result['stopped'] = 'db';
+                    $result['error'] = sprintf(
+                        '数据库写入失败，本批 %d 条已保留在队列中等待重试',
+                        count($rows)
+                    );
                     break;
                 }
 
                 // 走到这里说明数据库是通的：写不进去的个别行属于脏数据，
                 // 裁掉避免它们永远堵住队列
                 $redis->lTrim(self::KEY, count($items), -1);
-                $written += $ok;
+
+                $result['attempted'] += count($items);
+                $result['written']   += $ok;
+                $result['invalid']   += count($items) - count($rows);
+                $result['rejected']  += count($rows) - $ok;
 
                 if (count($items) < $take) {
+                    // 队列里已经没有更多消息了
+                    $result['stopped'] = 'empty';
                     break;
                 }
+
+                $result['stopped'] = 'limit';
             }
 
             $redis->set(self::LAST_FLUSH_KEY, time());
         } catch (\Throwable $e) {
-            // 刷库失败不影响调用方，数据仍在队列里
+            // 刷库中断不影响调用方，未裁剪的数据仍在队列里
+            $result['stopped'] = 'error';
+            $result['error'] = $e->getMessage();
         }
 
-        return $written;
+        return $result;
     }
 
     /**
