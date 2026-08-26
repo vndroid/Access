@@ -1168,6 +1168,9 @@ class Core
             'robot' => $this->ua->isRobot() ? 1 : 0,
             'robot_id' => $this->ua->getRobotID(),
             'robot_version' => $this->ua->getRobotVersion(),
+            # 在这里生成、随消息一起入队；重试时沿用同一个值，落库才是幂等的。
+            # 放到落库时再生成的话，每次重试都是一条「新」记录，唯一索引形同虚设
+            'event_id' => Queue::newEventId(),
         ];
 
         /*

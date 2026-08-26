@@ -18,8 +18,10 @@ CREATE TABLE `typecho_access` (
   `meta_id`           int(10)          default NULL,
   `robot`             tinyint(1)       default '0' ,
   `robot_id`          varchar(32)      default ''  ,
-  `robot_version`     varchar(32)      default ''
+  `robot_version`     varchar(32)      default ''  ,
+  `event_id`          char(32)         default NULL
 );
+CREATE UNIQUE INDEX `typecho_access_event_id`     ON `typecho_access` (`event_id`         );
 CREATE INDEX `typecho_access_time`              ON `typecho_access` (`time`             );
 CREATE INDEX `typecho_access_time_ip`           ON `typecho_access` (`time`, `ip`       );
 CREATE INDEX `typecho_access_time_ip_ua`        ON `typecho_access` (`time`, `ip`, `ua` );

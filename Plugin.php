@@ -28,7 +28,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.1.5
+ * @version 3.2.0
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
@@ -143,6 +143,8 @@ class Plugin implements PluginInterface
                 $table = Database::driver($db)->quoteTable($db->getPrefix() . 'access');
                 $db->query("DROP TABLE IF EXISTS {$table}", Db::WRITE);
                 $cleanFlag = true;
+                # 表都删了，记着的结构版本也该一起清掉，否则下次建表会被当成「已经是最新的」
+                Schema::forget(Database::main(), Migrate::fingerprint(Database::settings($config)));
             } catch (\Throwable $e) {
                 // 数据库暂时连不上不该让插件卡在「停用不掉」的状态。
                 // 这条提示显示在后台通知条里，原始异常可能很长，截断后再拼
@@ -478,6 +480,26 @@ class Plugin implements PluginInterface
     }
 
     /**
+     * 表结构升级的结果说明
+     *
+     * @param array $schema Schema::ensure() 的返回值
+     * @return string
+     */
+    private static function schemaNotice(array $schema): string
+    {
+        if ($schema['error'] !== null) {
+            return _t(
+                '（数据表结构升级未完成：%s，请修复后重新启用插件）',
+                mb_strimwidth(trim($schema['error']), 0, 60, '…', 'UTF-8')
+            );
+        }
+
+        return empty($schema['applied'])
+            ? ''
+            : _t('（数据表结构已由 %s 升级至 %s）', $schema['from'] ?? '3.1.x', $schema['to']);
+    }
+
+    /**
      * 配置切换前先把旧队列刷干净
      *
      * @param array $settings 即将保存的新配置
@@ -672,12 +694,20 @@ class Plugin implements PluginInterface
                 $msg = _t('数据表已经存在%s，插件启用成功，', $where) . $configLink;
             }
 
+            /*
+             * 表结构版本对不上就升级。放在这里而不是只放在 activate()：
+             * configHandle() 保存设置时也会走 install()，于是「换了插件文件但忘了
+             * 重新启用」的站点，只要在后台保存一次设置就能补上升级。
+             */
+            $dbSettings = Database::settings($settings);
+            $schema = Schema::ensure($db, Migrate::fingerprint($dbSettings), $created);
+
             if ($external) {
                 # 把主库里已有的统计数据搬过去；每次进来都检查，
                 # 执行超时截断的迁移会自动重新迁移
                 $migration = Migrate::ensure(
                     $db,
-                    Database::settings($settings),
+                    $dbSettings,
                     microtime(true) + Migrate::AUTO_DEADLINE
                 );
                 $note = self::migrationNotice($migration, $created, $where);
@@ -691,7 +721,7 @@ class Plugin implements PluginInterface
                 }
             }
 
-            return $msg;
+            return $msg . self::schemaNotice($schema);
         } catch (PluginException $e) {
             throw $e;
         } catch (DbException $e) {

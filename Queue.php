@@ -101,6 +101,7 @@ final class Queue
         'entrypoint' => 255, 'entrypoint_domain' => 100,
         'referer' => 255, 'referer_domain' => 100,
         'robot_id' => 32, 'robot_version' => 32,
+        'event_id' => 32,
     ];
 
     /** 这几列是 int unsigned，超出范围的值一律记为 null */
@@ -123,7 +124,28 @@ final class Queue
         'url', 'path', 'query_string', 'ip', 'entrypoint', 'entrypoint_domain',
         'referer', 'referer_domain', 'time', 'content_id', 'meta_id',
         'robot', 'robot_id', 'robot_version',
+        'event_id',
     ];
+
+    /**
+     * 生成一条访问日志的唯一标识
+     *
+     * 队列做不到「恰好一次」：写库成功之后、从 processing 里确认之前进程被杀，
+     * 下一轮会把同一批再写一遍。有了这个标识，重复的那次会被唯一索引挡下来，
+     * 于是「至少一次」的投递变成了「恰好一次」的结果。
+     *
+     * 前 16 位十六进制是毫秒时间戳（左移后补随机位），后 16 位纯随机：
+     * 时间在前使得新生成的标识单调递增，唯一索引的写入集中在 B+ 树右端，
+     * 不会像纯随机标识那样每次插入都落到随机页上。
+     *
+     * @return string 32 个十六进制字符
+     */
+    public static function newEventId(): string
+    {
+        $ms = (int)(microtime(true) * 1000);
+        return bin2hex(pack('J', ($ms << 16) | random_int(0, 0xFFFF)))
+            . bin2hex(random_bytes(8));
+    }
 
     /**
      * 是否启用写入队列

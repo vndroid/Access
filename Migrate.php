@@ -37,6 +37,7 @@ final class Migrate
         'url', 'path', 'query_string', 'ip', 'entrypoint', 'entrypoint_domain',
         'referer', 'referer_domain', 'time', 'content_id', 'meta_id',
         'robot', 'robot_id', 'robot_version',
+        'event_id',
     ];
 
     /**
@@ -178,9 +179,16 @@ final class Migrate
 
         @set_time_limit(0);
 
+        /*
+         * 源表不一定升级过：用户可能在 3.1.x 时就已经把统计数据搬到独立库，
+         * 主库里只剩下待迁移的残留，Schema::ensure() 升的是目标库而不是它。
+         * 按实际存在的列取数，缺 event_id 就整列略过（那部分数据本来也没有）。
+         */
+        $columns = self::usableColumns($main, $main->getPrefix() . 'access', self::COLUMNS);
+
         while (true) {
             $rows = $main->fetchAll(
-                $main->select(...self::COLUMNS)
+                $main->select(...$columns)
                     ->from('table.access')
                     ->where('id > ?', $lastId)
                     ->where('id <= ?', $maxSourceId)
@@ -192,7 +200,7 @@ final class Migrate
                 break;
             }
 
-            $moved += self::insertBatch($target, $rows, self::COLUMNS);
+            $moved += self::insertBatch($target, $rows, $columns);
             $lastId = (int)$rows[count($rows) - 1]['id'];
 
             if ($progress !== null) {
@@ -248,7 +256,12 @@ final class Migrate
 
             $adapter = $target->getAdapter();
             $table = $target->getPrefix() . 'access';
+
+            # 目标表还没升到 3.2.0 时把 event_id 摘掉，写入照常进行（只是这部分不幂等）
+            $columnList = self::usableColumns($target, $table, $columnList);
             $columns = implode(', ', array_map($adapter->quoteColumn(...), $columnList));
+
+            [$head, $tail] = self::ignoreClause(Database::driver($target), $adapter);
 
             $tuples = [];
             foreach ($rows as $row) {
@@ -260,17 +273,17 @@ final class Migrate
         }
 
         try {
-            $target->query("INSERT INTO {$table} ({$columns}) VALUES " . implode(', ', $tuples), Db::WRITE);
+            $target->query("{$head} {$table} ({$columns}) VALUES " . implode(', ', $tuples) . $tail, Db::WRITE);
             $result['written'] = count($rows);
             return $result;
         } catch (\Throwable $e) {
-            // 退化为逐行，逐个记下写不进去的行（例如主键冲突、字段超长）
+            // 退化为逐行，逐个记下写不进去的行（例如字段超长）
         }
 
         foreach ($rows as $i => $row) {
             try {
                 $target->query(
-                    "INSERT INTO {$table} ({$columns}) VALUES " . self::tuple($adapter, $row, $columnList),
+                    "{$head} {$table} ({$columns}) VALUES " . self::tuple($adapter, $row, $columnList) . $tail,
                     Db::WRITE
                 );
                 $result['written']++;
@@ -280,6 +293,68 @@ final class Migrate
         }
 
         return $result;
+    }
+
+    /**
+     * 「唯一冲突就跳过」的写法，三种数据库各不相同
+     *
+     * 冲突有两个来源，都该静默略过而不是当成失败：
+     * event_id 重复说明这条日志已经写过（队列做的是「至少一次」投递，重试必然带来重复），
+     * id 重复说明迁移时目标库里已经有这一行。
+     *
+     * MySQL 不用 INSERT IGNORE：它连字段超长、类型不符这类数据错误一并吞掉，
+     * 而写入队列正是靠「数据库明确拒绝」来把脏数据挑进死信队列的。
+     *
+     * @param Driver $driver
+     * @param Adapter $adapter
+     * @return array{0:string,1:string} [语句开头, 语句结尾]
+     */
+    private static function ignoreClause(Driver $driver, Adapter $adapter): array
+    {
+        $id = $adapter->quoteColumn('id');
+
+        return match ($driver) {
+            Driver::Mysql  => ['INSERT INTO', " ON DUPLICATE KEY UPDATE {$id} = {$id}"],
+            Driver::Sqlite => ['INSERT OR IGNORE INTO', ''],
+            Driver::Pgsql  => ['INSERT INTO', ' ON CONFLICT DO NOTHING'],
+        };
+    }
+
+    /**
+     * 每个连接只探一次列，刷库路径上不能每批都查一遍 information_schema
+     *
+     * 键必须是连接本身而不是「适配器名 + 表名」：run() 同时握着主库和目标库两个连接，
+     * 表名都叫 typecho_access、适配器也可能相同，但一个升级过、另一个没有。
+     */
+    private static array $columnCache = [];
+
+    /**
+     * 去掉目标表里并不存在的列
+     *
+     * 升级插件文件之后如果没有重新启用（或保存过设置），表结构还停在旧版本，
+     * 此时带着 event_id 去 INSERT 会整批失败 —— 那等于升级动作本身把统计写崩了。
+     * 宁可这段时间少一层幂等保护，也不能让数据写不进去。
+     *
+     * @param Db $db
+     * @param string $table 完整表名
+     * @param array $columnList
+     * @return array
+     */
+    private static function usableColumns(Db $db, string $table, array $columnList): array
+    {
+        if (!in_array('event_id', $columnList, true)) {
+            return $columnList;
+        }
+
+        $key = spl_object_id($db) . '|' . $table;
+        if (!array_key_exists($key, self::$columnCache)) {
+            self::$columnCache[$key] = Database::columnExists($db, $table, 'event_id');
+        }
+        if (self::$columnCache[$key]) {
+            return $columnList;
+        }
+
+        return array_values(array_filter($columnList, static fn($c) => $c !== 'event_id'));
     }
 
     /**

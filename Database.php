@@ -277,4 +277,44 @@ final class Database
             return false;
         }
     }
+
+    /**
+     * 某一列是否存在
+     *
+     * 表结构升级要靠它判断该不该执行 ALTER：重复启用插件是常态，
+     * 直接 ALTER 会因为「列已存在」报错。
+     *
+     * @param Db $db
+     * @param string $table 完整表名（含前缀）
+     * @param string $column
+     * @return bool
+     */
+    public static function columnExists(Db $db, string $table, string $column): bool
+    {
+        try {
+            $driver = self::driver($db);
+
+            if ($driver === Driver::Sqlite) {
+                # SQLite 没有 information_schema，只能把表结构列出来找
+                $rows = $db->fetchAll($db->query("PRAGMA table_info(`{$table}`)", Db::READ));
+                foreach ($rows as $row) {
+                    if (isset($row['name']) && strcasecmp((string)$row['name'], $column) === 0) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            $sql = match ($driver) {
+                Driver::Pgsql => "SELECT column_name FROM information_schema.columns
+                                  WHERE table_schema = ANY (current_schemas(false))
+                                    AND table_name = '{$table}' AND column_name = '{$column}'",
+                Driver::Mysql => "SHOW COLUMNS FROM `{$table}` LIKE '{$column}'",
+                Driver::Sqlite => '',
+            };
+            return !empty($db->fetchRow($db->query($sql, Db::READ)));
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
 }

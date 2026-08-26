@@ -19,8 +19,10 @@ CREATE TABLE typecho_access (
   "robot"             smallint     DEFAULT 0,
   "robot_id"          varchar(32)  DEFAULT '',
   "robot_version"     varchar(32)  DEFAULT '',
+  "event_id"          varchar(32)  DEFAULT NULL,
   PRIMARY KEY ("id")
 );
+CREATE UNIQUE INDEX typecho_access_event_id     ON typecho_access ("event_id"         );
 CREATE INDEX typecho_access_time              ON typecho_access ("time"             );
 CREATE INDEX typecho_access_time_ip           ON typecho_access ("time", "ip"       );
 CREATE INDEX typecho_access_time_ip_ua        ON typecho_access ("time", "ip", "ua" );
@@ -56,3 +58,4 @@ COMMENT ON COLUMN typecho_access."meta_id"           IS '索引序号';
 COMMENT ON COLUMN typecho_access."robot"             IS '是否爬虫';
 COMMENT ON COLUMN typecho_access."robot_id"          IS '爬虫名称';
 COMMENT ON COLUMN typecho_access."robot_version"     IS '爬虫版本';
+COMMENT ON COLUMN typecho_access."event_id"          IS '事件唯一标识';
