@@ -1191,10 +1191,6 @@ class Core
         if (!Queue::isDue($this->redis, $size, $interval)) {
             return;
         }
-        if (!Queue::acquireLock($this->redis)) {
-            // 已经有别的请求在刷了
-            return;
-        }
 
         $this->flushScheduled = true;
         $redis = $this->redis;
@@ -1206,10 +1202,23 @@ class Core
                 @fastcgi_finish_request();
             }
             @set_time_limit(0);
+
+            /*
+             * 锁在这里才抢，而不是在上面的调度阶段。
+             * scheduleFlush() 跑在 beforeRender 里，离真正刷库隔着整个页面渲染和输出，
+             * 提前抢锁等于把渲染时间也算进锁的存活期 —— 慢页面上锁很可能在刷到一半时过期，
+             * 于是队列上同时出现两个消费者。
+             * 代价只是并发请求会多做几次 SET NX，抢不到的直接收工。
+             */
+            $token = Queue::acquireLock($redis);
+            if ($token === null) {
+                // 已经有别的请求在刷了
+                return;
+            }
             try {
-                Queue::flush($redis, $db);
+                Queue::flush($redis, $db, 0, null, $token);
             } finally {
-                Queue::releaseLock($redis);
+                Queue::releaseLock($redis, $token);
             }
         });
     }
@@ -1225,14 +1234,15 @@ class Core
         if (!Queue::isEnabled($this->redis, $this->config)) {
             return 0;
         }
-        if (!Queue::acquireLock($this->redis)) {
+        $token = Queue::acquireLock($this->redis);
+        if ($token === null) {
             return 0;
         }
         try {
             # 这里只关心写入行数；完整的 attempted/invalid/rejected/stopped 见 Queue::flush()
-            return Queue::flush($this->redis, $this->db)['written'];
+            return Queue::flush($this->redis, $this->db, 0, null, $token)['written'];
         } finally {
-            Queue::releaseLock($this->redis);
+            Queue::releaseLock($this->redis, $token);
         }
     }
 

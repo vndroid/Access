@@ -35,8 +35,16 @@ final class Queue
     /** 上次刷库时间 */
     private const LAST_FLUSH_KEY = 'typecho_access:queue:last_flush';
 
-    /** 锁的存活时间（秒），防止刷库进程挂掉后死锁 */
-    private const LOCK_TTL = 60;
+    /**
+     * 锁的存活时间（秒），防止刷库进程挂掉后死锁
+     *
+     * 刷库期间会周期性续租，所以这个值不需要覆盖整次刷库的耗时，
+     * 只要能覆盖「两次续租之间」即可；取值越小，持锁进程被杀之后锁自然释放得越快。
+     */
+    private const LOCK_TTL = 30;
+
+    /** 续租间隔（秒）：刷库过程中每隔这么久把锁的存活时间顶回 LOCK_TTL */
+    private const LOCK_RENEW_INTERVAL = 10;
 
     /** 队列长度硬上限，超出后丢弃最旧的记录，避免数据库长时间不可用时撑爆 Redis */
     public const MAX_LENGTH = 200000;
@@ -48,7 +56,7 @@ final class Queue
      * 单次刷库的墙钟上限（秒）
      *
      * 条数上限挡不住「每条都很慢」的情况：数据库变慢、批量 INSERT 反复退化成逐行时，
-     * 5000 条也可能跑上好几分钟，而刷库锁的存活时间只有 LOCK_TTL 秒。
+     * 5000 条也可能跑上好几分钟。锁虽然会续租，但一次刷库无限期占着队列本身就不健康。
      * 这里再加一道时间闸门，超时就收工，剩下的留给下一次。
      */
     public const FLUSH_DEADLINE = 20;
@@ -159,13 +167,45 @@ final class Queue
     /**
      * 抢刷库锁，拿到的请求才执行刷库
      *
+     * 锁值是一次性随机 token 而不是 PID：PID 会复用，多机部署时更是会重复，
+     * 拿它当身份标识意味着「我」和「别人」根本分不开。
+     *
      * @param Redis $redis
-     * @return bool
+     * @return string|null 抢到返回本次持有的 token，没抢到返回 null
      */
-    public static function acquireLock(Redis $redis): bool
+    public static function acquireLock(Redis $redis): ?string
     {
         try {
-            return (bool)$redis->set(self::LOCK_KEY, (string)getmypid(), ['nx', 'ex' => self::LOCK_TTL]);
+            $token = bin2hex(random_bytes(16));
+            $ok = $redis->set(self::LOCK_KEY, $token, ['nx', 'ex' => self::LOCK_TTL]);
+            return $ok ? $token : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * 续租：确认锁还在自己手上，然后把存活时间顶回 LOCK_TTL
+     *
+     * 返回 false 意味着锁已经不属于自己了（过期后被别人抢走，或被误删），
+     * 此时调用方必须立刻停手：继续刷下去就会和新的持有者同时读写、裁剪同一个队列。
+     *
+     * @param Redis $redis
+     * @param string $token acquireLock() 返回的 token
+     * @return bool
+     */
+    public static function renewLock(Redis $redis, string $token): bool
+    {
+        try {
+            // 比较和续期必须是原子的，否则「比较通过 → 锁过期 → 续期」会把别人的锁续走
+            $script = <<<'LUA'
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("expire", KEYS[1], ARGV[2])
+else
+    return 0
+end
+LUA;
+            return (int)$redis->eval($script, [self::LOCK_KEY, $token, self::LOCK_TTL], 1) === 1;
         } catch (\Throwable $e) {
             return false;
         }
@@ -174,13 +214,27 @@ final class Queue
     /**
      * 释放刷库锁
      *
+     * 只删自己的锁：直接 DEL 的话，一个超时的旧消费者收尾时会把新消费者刚拿到的锁删掉，
+     * 于是第三个请求又能抢到锁，队列上同时出现多个消费者。
+     *
      * @param Redis $redis
+     * @param string|null $token acquireLock() 返回的 token；null 表示没拿到锁，什么都不用做
      * @return void
      */
-    public static function releaseLock(Redis $redis): void
+    public static function releaseLock(Redis $redis, ?string $token): void
     {
+        if ($token === null) {
+            return;
+        }
         try {
-            $redis->del(self::LOCK_KEY);
+            $script = <<<'LUA'
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+LUA;
+            $redis->eval($script, [self::LOCK_KEY, $token], 1);
         } catch (\Throwable $e) {
         }
     }
@@ -200,6 +254,7 @@ final class Queue
      * @param Db $db 统计数据所在的数据库
      * @param int $limit 本次最多处理多少条，0 表示用默认上限
      * @param float|null $deadline 墙钟截止时间（microtime 时间戳），null 表示用默认预算
+     * @param string|null $token 刷库锁的 token；传入后会在批次之间续租，一旦发现锁已易主立即停手
      * @return array{attempted:int,written:int,invalid:int,rejected:int,stopped:string,error:?string}
      *         attempted 取走并裁掉的消息数；written 实际入库行数；
      *         invalid  JSON 解析失败被丢弃的条数；rejected 数据库逐行重试仍写不进去被丢弃的条数；
@@ -209,13 +264,20 @@ final class Queue
      *           limit    达到条数上限，队列中仍有积压
      *           deadline 达到时间上限，队列中仍有积压
      *           db       数据库不可用，本批已保留在队列中等待重试
+     *           lock     刷库锁已经不在自己手上，为避免多消费者并发而主动停手
      *           error    Redis 或其它异常，详见 error
      */
-    public static function flush(Redis $redis, Db $db, int $limit = 0, ?float $deadline = null): array
-    {
+    public static function flush(
+        Redis $redis,
+        Db $db,
+        int $limit = 0,
+        ?float $deadline = null,
+        ?string $token = null
+    ): array {
         $limit = $limit > 0 ? $limit : self::FLUSH_LIMIT;
         $deadline = $deadline ?? (microtime(true) + self::FLUSH_DEADLINE);
         $batchSize = Migrate::BATCH_SIZE;
+        $renewAt = microtime(true) + self::LOCK_RENEW_INTERVAL;
 
         $result = [
             'attempted' => 0,
@@ -228,9 +290,21 @@ final class Queue
 
         try {
             while ($result['attempted'] < $limit) {
-                if (microtime(true) >= $deadline) {
+                $now = microtime(true);
+
+                if ($now >= $deadline) {
                     $result['stopped'] = 'deadline';
                     break;
+                }
+
+                // 续租放在取数据之前：确认锁还在自己手上，再动队列
+                if ($token !== null && $now >= $renewAt) {
+                    if (!self::renewLock($redis, $token)) {
+                        $result['stopped'] = 'lock';
+                        $result['error'] = '刷库锁已易主，为避免与另一个消费者同时裁剪队列而停止';
+                        break;
+                    }
+                    $renewAt = $now + self::LOCK_RENEW_INTERVAL;
                 }
 
                 $take = min($batchSize, $limit - $result['attempted']);

@@ -116,7 +116,8 @@ try {
         exit(0);
     }
 
-    if (!Queue::acquireLock($redis)) {
+    $token = Queue::acquireLock($redis);
+    if ($token === null) {
         say('已有其它进程正在刷库，本次跳过。');
         exit(0);
     }
@@ -128,9 +129,9 @@ try {
     $startedAt = microtime(true);
 
     try {
-        $result = Queue::flush($redis, $db, $limit, $startedAt + $seconds);
+        $result = Queue::flush($redis, $db, $limit, $startedAt + $seconds, $token);
     } finally {
-        Queue::releaseLock($redis);
+        Queue::releaseLock($redis, $token);
     }
 
     $remaining = Queue::length($redis);
@@ -155,6 +156,7 @@ try {
         'limit'    => sprintf('本次达到条数上限 %s，剩余部分请再次执行。', number_format($limit)),
         'deadline' => sprintf('本次达到时间上限 %d 秒，剩余部分请再次执行。', $seconds),
         'db'       => $result['error'],
+        'lock'     => $result['error'],
         'error'    => '刷库中断：' . $result['error'],
         default    => '',
     };
