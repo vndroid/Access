@@ -130,17 +130,35 @@ final class Queue
     }
 
     /**
-     * 队列长度
+     * 队列长度，Redis 出错时按 0 处理
+     *
+     * 只在「拿不到长度就当没积压」无所谓的地方用（例如后台面板上的一个数字）。
+     * 需要区分「队列为空」和「Redis 故障」的调用方一律用 tryLength()。
      *
      * @param Redis $redis
      * @return int
      */
     public static function length(Redis $redis): int
     {
+        return self::tryLength($redis) ?? 0;
+    }
+
+    /**
+     * 队列长度，Redis 出错时返回 null
+     *
+     * 把故障伪装成 0 会让「队列为空」和「Redis 挂了」变成同一个返回值，
+     * 于是定时任务打印「队列为空，无需刷库」然后以成功退出，故障被彻底掩盖。
+     *
+     * @param Redis $redis
+     * @return int|null
+     */
+    public static function tryLength(Redis $redis): ?int
+    {
         try {
-            return (int)$redis->lLen(self::KEY);
+            $length = $redis->lLen(self::KEY);
+            return $length === false ? null : (int)$length;
         } catch (\Throwable $e) {
-            return 0;
+            return null;
         }
     }
 

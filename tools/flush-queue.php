@@ -16,6 +16,12 @@
  *   --limit=5000              本次最多处理多少条，默认 5000
  *   --deadline=20             本次最多跑多少秒，默认 20，到点收工剩下的留给下一次
  *   --quiet                   没有积压时不输出任何内容，适合 cron
+ *   --lenient                 有消息转入死信队列时不改退出码（仍会打印警告）
+ *
+ * 退出码：
+ *   0  正常（含「队列为空」「已有其它进程在刷」「达到本次上限，剩余部分下次继续」）
+ *   1  有需要人过问的问题：Redis/数据库不可用、刷库中途出错、锁易主，
+ *      或有消息没能写进数据库而转入了死信队列（--lenient 可豁免最后一项）
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -110,7 +116,13 @@ try {
     }
     $redis->ping();
 
-    $pending = Queue::length($redis);
+    # 这里必须用 tryLength()：length() 会把 Redis 故障伪装成 0，
+    # 于是「Redis 挂了」被打印成「队列为空」，再以退出码 0 收场，故障就此石沉大海
+    $pending = Queue::tryLength($redis);
+    if ($pending === null) {
+        fwrite(STDERR, "无法读取队列长度，Redis 可能已不可用。\n");
+        exit(1);
+    }
     if ($pending === 0) {
         say('队列为空，无需刷库。');
         exit(0);
@@ -134,7 +146,7 @@ try {
         Queue::releaseLock($redis, $token);
     }
 
-    $remaining = Queue::length($redis);
+    $remaining = Queue::tryLength($redis) ?? 0;
     printf(
         "已处理 %s 条（写入 %s 条），耗时 %.2f 秒，队列剩余 %s 条。\n",
         number_format($result['attempted']),
@@ -153,6 +165,14 @@ try {
         );
     }
 
+    /*
+     * 退出码必须反映真实结果。
+     * Queue::flush() 内部会吞掉数据库异常并照常返回，所以「写入 0 条」和「一切正常」
+     * 在标准输出上长得差不多；只看有没有抛异常的话，一次彻底失败的刷库同样以 0 退出，
+     * cron 和监控完全看不出来。
+     */
+    $failed = in_array($result['stopped'], ['db', 'lock', 'error'], true);
+
     $note = match ($result['stopped']) {
         'limit'    => sprintf('本次达到条数上限 %s，剩余部分请再次执行。', number_format($limit)),
         'deadline' => sprintf('本次达到时间上限 %d 秒，剩余部分请再次执行。', $seconds),
@@ -162,10 +182,24 @@ try {
         default    => '',
     };
     if ($note !== '') {
-        echo $note . "\n";
+        # 出问题的说明走 STDERR，正常的进度提示走 STDOUT
+        fwrite($failed ? STDERR : STDOUT, $note . "\n");
+    }
+
+    # 进了死信队列的消息 = 没能写进数据库的数据，默认也算需要人过问
+    $lenient = !empty($argvOptions['lenient']);
+    if ($result['dead'] > 0) {
+        fwrite(
+            $lenient ? STDOUT : STDERR,
+            sprintf("有 %s 条消息未能写入数据库，已转入死信队列，请检查。\n", number_format($result['dead']))
+        );
+        if (!$lenient) {
+            $failed = true;
+        }
     }
 
     $redis->close();
+    exit($failed ? 1 : 0);
 } catch (\Throwable $e) {
     fwrite(STDERR, '刷库失败：' . $e->getMessage() . "\n");
     fwrite(STDERR, $e->getFile() . ':' . $e->getLine() . "\n");
