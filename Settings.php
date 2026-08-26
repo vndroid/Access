@@ -43,7 +43,7 @@ final class Settings
         'redisPort' => '6379',
         'redisAuth' => '',
         'writeQueue' => '1',
-        'queueFlushSize' => '500',
+        'queueFlushSize' => '100',
         'queueFlushInterval' => '60',
         'dbType' => 'follow',
         'dbHost' => '127.0.0.1',

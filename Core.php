@@ -1242,7 +1242,7 @@ class Core
 
         $size = (int)($this->config->queueFlushSize ?? 0);
         $interval = (int)($this->config->queueFlushInterval ?? 0);
-        $size = $size > 0 ? $size : 500;
+        $size = $size > 0 ? $size : 100;
         $interval = $interval > 0 ? $interval : 60;
 
         if (!Queue::isDue($this->redis, $size, $interval)) {
