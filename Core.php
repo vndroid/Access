@@ -42,6 +42,9 @@ class Core
     /** 历史日期的统计不会再变化，缓存 40 天足够覆盖当月图表 */
     private const PAST_DAY_TTL = 3456000;
 
+    /** 匿名埋点接口每个 IP 每分钟允许的次数 */
+    private const TRACK_RATE_LIMIT = 60;
+
     public readonly UA $ua;
     public readonly Config $config;
     public readonly string $action;
@@ -1167,6 +1170,13 @@ class Core
             'robot_version' => $this->ua->getRobotVersion(),
         ];
 
+        /*
+         * 所有字段都来自访客可控的请求头和查询串，先按表结构裁到合法范围。
+         * 直写这条路也必须过一遍：Redis 不可用时每次访问都走它，
+         * 只在入队时截断的话，恰恰是最脆弱的降级路径没有防护。
+         */
+        $rows = Queue::normalize($rows);
+
         # 优先入队，攒批后统一落库；Redis 不可用或入队失败时退回直写
         if (Queue::isEnabled($this->redis, $this->config) && Queue::push($this->redis, $rows)) {
             $this->scheduleFlush();
@@ -1176,6 +1186,37 @@ class Core
         try {
             $this->db->query($this->db->insert('table.access')->rows($rows));
         } catch (\Throwable $e) {
+        }
+    }
+
+    /**
+     * 匿名埋点接口的频率闸门
+     *
+     * /access/track/flag.gif 无需登录即可调用，不限速的话一个脚本就能
+     * 无限灌入日志，既污染统计也放大写入压力。
+     * 计数放在 Redis 里；没有 Redis 时无处计数，那就不限（宁可不拦，也不误伤）。
+     *
+     * @access public
+     * @return bool 允许记录返回 true
+     */
+    public function allowTracking(): bool
+    {
+        if ($this->redis === null) {
+            return true;
+        }
+
+        try {
+            $ip = $this->request->getIp() ?: '0.0.0.0';
+            # 按分钟分桶，键名自带时间戳，过期即天然滚动
+            $key = Cache::key('rate:' . date('YmdHi') . ':' . md5($ip));
+            $hits = (int)$this->redis->incr($key);
+            if ($hits === 1) {
+                $this->redis->expire($key, 120);
+            }
+            return $hits <= self::TRACK_RATE_LIMIT;
+        } catch (\Throwable $e) {
+            // 限流自己出问题不该把正常统计一起拦下来
+            return true;
         }
     }
 

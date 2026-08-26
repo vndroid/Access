@@ -28,7 +28,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.1.3
+ * @version 3.1.5
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
@@ -454,6 +454,14 @@ class Plugin implements PluginInterface
             }
         }
 
+        /*
+         * 新配置会换掉队列的归属时，先用「旧配置」把积压刷干净。
+         * 保存之后再刷来不及：改了 Redis 地址就连不上老队列，
+         * 改了统计数据库则会把老消息写进新库 —— 两种都是无声的数据错位。
+         * 必须赶在 configPlugin() 之前，Core 读的是当下生效的那份配置。
+         */
+        $drainNote = self::drainBeforeSwitch($settings);
+
         Edit::configPlugin('Access', $settings);
 
         # 配置保存后，按新的数据库设置建表并迁移历史数据
@@ -466,7 +474,74 @@ class Plugin implements PluginInterface
         # 顺带探测一次 Redis，避免在后台改完设置却毫无反馈
         $msg .= self::probeRedis($settings);
 
-        self::goBack(_t('插件设置已经保存。%s', $msg), 'success');
+        self::goBack(_t('插件设置已经保存。%s%s', $msg, $drainNote), 'success');
+    }
+
+    /**
+     * 配置切换前先把旧队列刷干净
+     *
+     * @param array $settings 即将保存的新配置
+     * @return string 要追加给用户的提示，无事发生时为空串
+     */
+    private static function drainBeforeSwitch(array $settings): string
+    {
+        try {
+            $old = Options::alloc()->plugin('Access');
+        } catch (\Throwable $e) {
+            return '';
+        }
+
+        # 归属没变的话，老消息在新配置下照样会被消费，不用动它
+        if (self::queueHome($old) === self::queueHome($settings)) {
+            return '';
+        }
+
+        try {
+            $drain = (new Core())->drainQueue();
+        } catch (\Throwable $e) {
+            return _t('旧队列状态未能确认。');
+        }
+
+        if ($drain['clean']) {
+            return $drain['written'] > 0
+                ? _t('切换前已刷入积压 %s 条。', number_format($drain['written']))
+                : '';
+        }
+
+        $left = $drain['pending'] === null
+            ? _t('若干')
+            : number_format((int)$drain['pending'] + (int)$drain['dead']);
+
+        return _t('注意：旧 Redis 中还有 %s 条未落库，新配置不会再处理。', $left);
+    }
+
+    /**
+     * 队列的「归属」指纹
+     *
+     * 换掉其中任何一项，原来那批消息就不再属于新配置：
+     * Redis 目标变了连不上老队列，写入队列关了没人消费，统计库变了会写错地方。
+     *
+     * @param array|\Typecho\Config|null $config
+     * @return string
+     */
+    private static function queueHome($config): string
+    {
+        $target = Health::redisTarget($config);
+
+        $writeQueue = '';
+        if (is_array($config) || $config instanceof \ArrayAccess) {
+            $writeQueue = (string)($config['writeQueue'] ?? '');
+        } elseif (is_object($config)) {
+            $writeQueue = (string)($config->writeQueue ?? '');
+        }
+
+        return md5(implode('|', [
+            $target === null
+                ? 'redis-off'
+                : $target['host'] . ':' . $target['port'] . ':' . $target['auth'],
+            $writeQueue === '0' ? 'queue-off' : 'queue-on',
+            Migrate::fingerprint(Database::settings($config)),
+        ]));
     }
 
     /**

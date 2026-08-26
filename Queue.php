@@ -85,6 +85,38 @@ final class Queue
      */
     public const FLUSH_DEADLINE = 20;
 
+    /**
+     * 各列允许的最大字符数，与 sql/*.sql 里的 varchar 长度一一对应
+     *
+     * 不截断的话，一条超长 UA 或 URL 会让整批 INSERT 失败，
+     * 然后退化成 1000 次逐行 INSERT —— 一条脏数据放大成一千次数据库往返。
+     * 而这个入口是匿名可达的。
+     */
+    private const LIMITS = [
+        'ua' => 255,
+        'browser_id' => 32, 'browser_version' => 32,
+        'os_id' => 32, 'os_version' => 32,
+        'url' => 255, 'path' => 255, 'query_string' => 255,
+        'ip' => 38,
+        'entrypoint' => 255, 'entrypoint_domain' => 100,
+        'referer' => 255, 'referer_domain' => 100,
+        'robot_id' => 32, 'robot_version' => 32,
+    ];
+
+    /** 这几列是 int unsigned，超出范围的值一律记为 null */
+    private const ID_COLUMNS = ['content_id', 'meta_id'];
+
+    /** int unsigned 的上界 */
+    private const UNSIGNED_INT_MAX = 4294967295;
+
+    /**
+     * 单条消息的字节上限
+     *
+     * normalize() 按列宽截断之后正常数据远到不了这个量级，
+     * 这道防线只为拦住结构本身就异常的输入。
+     */
+    public const MAX_PAYLOAD_BYTES = 8192;
+
     /** 入队字段，顺序固定；与 Migrate::COLUMNS 相同但不含自增主键 */
     public const COLUMNS = [
         'ua', 'browser_id', 'browser_version', 'os_id', 'os_version',
@@ -122,6 +154,15 @@ final class Queue
         try {
             $payload = json_encode(self::normalize($row), JSON_UNESCAPED_UNICODE);
             if ($payload === false) {
+                return false;
+            }
+
+            /*
+             * 截断之后还能超限，说明这条记录的结构本身就不对（例如字段被塞成了数组）。
+             * 不入队，调用方会退回直写；直写同样会失败，但至少不会把异常数据
+             * 塞进队列去拖累整批 INSERT。
+             */
+            if (strlen($payload) > self::MAX_PAYLOAD_BYTES) {
                 return false;
             }
 
@@ -637,17 +678,61 @@ LUA;
     }
 
     /**
-     * 补齐字段并保证顺序，避免不同版本的记录结构不一致导致列错位
+     * 补齐字段、保证顺序，并把超出列宽的值裁到合法范围
+     *
+     * 补齐顺序是为了避免不同版本的记录结构不一致导致列错位；
+     * 截断是因为这些值全部来自访客可控的请求头和查询串 ——
+     * 不设上限的话，一条超长 UA 就能让整批 INSERT 失败并退化成上千次逐行写入。
+     *
+     * 入队和直写两条路都要过这里，所以是 public。
      *
      * @param array $row
      * @return array
      */
-    private static function normalize(array $row): array
+    public static function normalize(array $row): array
     {
         $normalized = [];
         foreach (self::COLUMNS as $column) {
-            $normalized[$column] = array_key_exists($column, $row) ? $row[$column] : null;
+            $value = array_key_exists($column, $row) ? $row[$column] : null;
+
+            /*
+             * 数组/对象没有合理的字符串形式，(string) 转换只会得到 "Array" 外加一条
+             * PHP warning，而这条路径是匿名请求走的 —— 直接当作「没有这个值」。
+             */
+            if ($value !== null && !is_scalar($value)) {
+                $value = null;
+            }
+
+            if ($value !== null && isset(self::LIMITS[$column])) {
+                $value = (string)$value;
+                # varchar(N) 数的是字符不是字节，所以用 mb_ 系列
+                if (mb_strlen($value, 'UTF-8') > self::LIMITS[$column]) {
+                    $value = mb_substr($value, 0, self::LIMITS[$column], 'UTF-8');
+                }
+            } elseif ($value !== null && in_array($column, self::ID_COLUMNS, true)) {
+                $value = self::clampId($value);
+            }
+
+            $normalized[$column] = $value;
         }
         return $normalized;
+    }
+
+    /**
+     * 把 cid / mid 收进 int unsigned 的范围，越界或非数字一律当作「没有」
+     *
+     * is_numeric() 拦不住 '1e50'、'0x1A'、' 12 ' 这类值，
+     * 它们能一路走到 INSERT 才报错。
+     *
+     * @param mixed $value
+     * @return int|null
+     */
+    private static function clampId(mixed $value): ?int
+    {
+        if (!is_numeric($value)) {
+            return null;
+        }
+        $id = (int)$value;
+        return ($id < 0 || $id > self::UNSIGNED_INT_MAX) ? null : $id;
     }
 }

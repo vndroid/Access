@@ -46,7 +46,7 @@ class Action extends Widget implements ActionInterface
         // writeType: 0 = 前端（本接口负责写），1 = 后端（Plugin::backend 已经写过了）。
         // 这里只在前端模式下写日志：后端模式下该埋点脚本根本不会被输出，
         // 若仍照写就等于给匿名请求开了一个可以重复灌数据的口子。
-        if ($this->getAccess()->config->writeType == 0) {
+        if ($this->getAccess()->config->writeType == 0 && $this->getAccess()->allowTracking()) {
             $this->getAccess()->writeLogs(null, $this->request->get('u'), $this->request->get('cid'), $this->request->get('mid'));
         }
         echo $image;
