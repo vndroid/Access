@@ -177,6 +177,12 @@ try {
      */
     $failed = in_array($result['stopped'], ['db', 'lock', 'error'], true);
 
+    # processing 长期不为 0 说明每轮刷库都没能确认，值得单独点出来
+    $stuck = Queue::processingLength($redis);
+    if ($stuck > 0) {
+        printf("有 %s 条已取出但尚未确认，下次刷库会先处理它们。\n", number_format($stuck));
+    }
+
     $note = match ($result['stopped']) {
         'limit'    => sprintf('本次达到条数上限 %s，剩余部分请再次执行。', number_format($limit)),
         'deadline' => sprintf('本次达到时间上限 %d 秒，剩余部分请再次执行。', $seconds),

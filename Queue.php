@@ -18,6 +18,10 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  * - 削掉每次访问的建连接开销（独立数据库模式下这一项占单次写入的六成）
  * - 把数据库连接数从「每次访问一条」降到「每批一条」，避免突发流量打满 max_connections
  *
+ * 消息在 Redis 里经过三个列表：主队列 -> processing（正在写库）-> 死信（写不进去的）。
+ * 中间那一步不是多余的：直接「读了再按位置裁掉」的话，生产者的裁剪一旦插进来，
+ * 消费者就会裁掉别人刚写进来的消息。
+ *
  * 刷库由请求顺带触发：达到条数或时间阈值时，本次请求抢到锁的那一个负责刷，
  * 并且推迟到响应发出之后执行，访客感知不到。
  * 另外控制台加载数据时会同步刷一次，命令行脚本可挂 cron 兜底。
@@ -28,6 +32,14 @@ final class Queue
 {
     /** 待写入队列（Redis List） */
     public const KEY = 'typecho_access:queue';
+
+    /**
+     * 正在写库的一批（Redis List）
+     *
+     * 消费者不再「读了之后按位置裁掉」，而是用一段 Lua 把消息原子地从主队列搬到这里，
+     * 写库成功再从这里清掉。中途崩掉的话数据留在这里，下一次刷库会先把它捡回来。
+     */
+    public const PROCESSING_KEY = 'typecho_access:queue:processing';
 
     /**
      * 死信队列（Redis List）
@@ -144,10 +156,13 @@ final class Queue
     }
 
     /**
-     * 队列长度，Redis 出错时返回 null
+     * 还没进数据库的消息条数，Redis 出错时返回 null
      *
      * 把故障伪装成 0 会让「队列为空」和「Redis 挂了」变成同一个返回值，
      * 于是定时任务打印「队列为空，无需刷库」然后以成功退出，故障被彻底掩盖。
+     *
+     * 含 processing：那批已经离开主队列但还没落库，对「还剩多少没写」这个问题
+     * 它和主队列里的消息没有区别，漏算会让停用插件时误判成「已经刷干净了」。
      *
      * @param Redis $redis
      * @return int|null
@@ -155,10 +170,31 @@ final class Queue
     public static function tryLength(Redis $redis): ?int
     {
         try {
-            $length = $redis->lLen(self::KEY);
-            return $length === false ? null : (int)$length;
+            $queue = $redis->lLen(self::KEY);
+            $processing = $redis->lLen(self::PROCESSING_KEY);
+            if ($queue === false || $processing === false) {
+                return null;
+            }
+            return (int)$queue + (int)$processing;
         } catch (\Throwable $e) {
             return null;
+        }
+    }
+
+    /**
+     * 正在写库（或上次没确认完）的条数
+     *
+     * 正常情况下要么是 0，要么是一个批次的大小；长期居高不下说明刷库一直在失败。
+     *
+     * @param Redis $redis
+     * @return int
+     */
+    public static function processingLength(Redis $redis): int
+    {
+        try {
+            return (int)$redis->lLen(self::PROCESSING_KEY);
+        } catch (\Throwable $e) {
+            return 0;
         }
     }
 
@@ -175,6 +211,52 @@ final class Queue
         } catch (\Throwable $e) {
             return 0;
         }
+    }
+
+    /**
+     * 原子地从主队列取走一批，并暂存到 processing
+     *
+     * 这里必须是一段 Lua，而不是 LRANGE + LTRIM 两条命令：
+     * 生产者在队列超过 MAX_LENGTH 时也会 LTRIM 裁掉队首，
+     * 一旦它插在消费者的「读」和「裁」之间，消费者按旧位置裁掉的
+     * 就是新写进来、还没落库的消息 —— 无声丢数据。
+     * Redis 执行脚本期间不处理别的命令，读和裁之间就没有缝可插了。
+     *
+     * @param Redis $redis
+     * @param int $count 最多取多少条
+     * @return array 取到的原始消息，顺序与队列一致
+     */
+    private static function claim(Redis $redis, int $count): array
+    {
+        $script = <<<'LUA'
+local items = redis.call('LRANGE', KEYS[1], 0, ARGV[1] - 1)
+if #items == 0 then
+    return items
+end
+redis.call('LTRIM', KEYS[1], #items, -1)
+for i = 1, #items do
+    redis.call('RPUSH', KEYS[2], items[i])
+end
+return items
+LUA;
+
+        $items = $redis->eval($script, [self::KEY, self::PROCESSING_KEY, $count], 2);
+        return is_array($items) ? $items : [];
+    }
+
+    /**
+     * 上一次没能确认的那批
+     *
+     * 消费者取走消息之后、写库成功之前挂掉，数据就停在 processing 里。
+     * 每轮开工前先把它捡回来，否则新取的一批会和它混在一起，没法分别确认。
+     *
+     * @param Redis $redis
+     * @return array
+     */
+    private static function leftover(Redis $redis): array
+    {
+        $items = $redis->lRange(self::PROCESSING_KEY, 0, -1);
+        return is_array($items) ? $items : [];
     }
 
     /**
@@ -398,7 +480,13 @@ LUA;
                 }
 
                 $take = min($batchSize, $limit - $result['attempted']);
-                $items = $redis->lRange(self::KEY, 0, $take - 1);
+
+                # 先把上一轮没确认完的捡回来，没有残余才去主队列取新的
+                $items = self::leftover($redis);
+                $fromLeftover = !empty($items);
+                if (!$fromLeftover) {
+                    $items = self::claim($redis, $take);
+                }
                 if (empty($items)) {
                     $result['stopped'] = 'empty';
                     break;
@@ -427,6 +515,7 @@ LUA;
                  * 之前这里一律当成前者，于是「队列尾部只剩一条脏数据」会让整个队列永久卡死。
                  */
                 if ($ok === 0 && !empty($rows) && !Migrate::alive($db)) {
+                    # 不确认，这批原样停在 processing 里，下次刷库会先把它捡回来
                     $result['stopped'] = 'db';
                     $result['error'] = sprintf(
                         '数据库不可用，本批 %d 条已保留在队列中等待重试',
@@ -453,7 +542,9 @@ LUA;
                 }
 
                 $result['dead'] += self::pushDead($redis, $dead);
-                $redis->lTrim(self::KEY, count($items), -1);
+
+                # 确认：这批已经有归宿（进了数据库或死信），从 processing 清掉
+                $redis->lTrim(self::PROCESSING_KEY, count($items), -1);
 
                 # 只有真的写进去的行才会影响统计，被拒的不算
                 if ($ok > 0) {
@@ -470,7 +561,8 @@ LUA;
                 $result['invalid']   += count($items) - count($rows);
                 $result['rejected']  += count($outcome['failed']);
 
-                if (count($items) < $take) {
+                # 残余批次的条数和 $take 无关，不能拿它推断队列空了
+                if (!$fromLeftover && count($items) < $take) {
                     // 队列里已经没有更多消息了
                     $result['stopped'] = 'empty';
                     break;
