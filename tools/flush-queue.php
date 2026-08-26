@@ -69,6 +69,7 @@ while (ob_get_level() > 0) {
 
 use Typecho\Db;
 use TypechoPlugin\Access\Database;
+use TypechoPlugin\Access\Health;
 use TypechoPlugin\Access\Migrate;
 use TypechoPlugin\Access\Queue;
 
@@ -104,17 +105,20 @@ try {
         exit(0);
     }
 
-    $redis = new Redis();
-    $host = $settings['redisHost'] ?: '127.0.0.1';
-    $port = (int)($settings['redisPort'] ?: 6379);
-    if (!$redis->connect($host, $port, 3)) {
-        fwrite(STDERR, "无法连接 Redis {$host}:{$port}\n");
+    # 和前台走同一个工厂，超时才不会漏设 —— 这里以前只有连接超时、没有读超时，
+    # Redis 连上了却不回话时，cron 任务会一直挂着
+    try {
+        $redis = Health::connect(
+            $settings['redisHost'] ?: '127.0.0.1',
+            (int)($settings['redisPort'] ?: 6379),
+            (string)($settings['redisAuth'] ?? ''),
+            Health::CLI_CONNECT_TIMEOUT,
+            Health::CLI_READ_TIMEOUT
+        );
+    } catch (\Throwable $e) {
+        fwrite(STDERR, $e->getMessage() . "\n");
         exit(1);
     }
-    if (!empty($settings['redisAuth'])) {
-        $redis->auth($settings['redisAuth']);
-    }
-    $redis->ping();
 
     # 这里必须用 tryLength()：length() 会把 Redis 故障伪装成 0，
     # 于是「Redis 挂了」被打印成「队列为空」，再以退出码 0 收场，故障就此石沉大海

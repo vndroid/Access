@@ -175,6 +175,48 @@ class Plugin implements PluginInterface
     }
 
     /**
+     * 清除 Redis 中 Access 插件的缓存键
+     *
+     * @param mixed $config 插件配置
+     * @param bool $keepQueue 为 true 时跳过队列相关的键（队列、死信、锁、刷库时间戳）
+     * @return void
+     */
+    private static function clearRedisCache($config, bool $keepQueue = false): void
+    {
+        try {
+            $redis = Health::connect(
+                $config->redisHost ?: '127.0.0.1',
+                (int)($config->redisPort ?: 6379),
+                (string)($config->redisAuth ?? '')
+            );
+
+            // 使用 SCAN 迭代删除所有匹配前缀的键，避免 KEYS 阻塞
+            $prefix = 'typecho_access:*';
+            $iterator = null;
+            while (($keys = $redis->scan($iterator, $prefix, 100)) !== false) {
+                if ($keepQueue) {
+                    /*
+                     * typecho_access:queue、:queue:dead、:queue:lock、:queue:last_flush
+                     * 装的是还没落库的数据和它的处理状态，不是缓存。
+                     * 缓存删了会重算，这些删了就没了。
+                     */
+                    $keys = array_values(array_filter(
+                        $keys,
+                        static fn($key) => !Queue::isDataKey((string)$key)
+                    ));
+                }
+                if (!empty($keys)) {
+                    $redis->del($keys);
+                }
+            }
+
+            $redis->close();
+        } catch (\Throwable $e) {
+            // 清除失败不影响禁用流程
+        }
+    }
+
+    /**
      * 把队列的收尾情况说清楚
      *
      * 这条提示显示在后台的通知条里，位置很窄，所以只讲两件事：
@@ -458,7 +500,7 @@ class Plugin implements PluginInterface
      * 探测配置里的 Redis 是否可用
      *
      * Redis 只是加速器，连不上不该拦住插件启用 —— 缓存与写入队列会自动降级，
-     * 统计功能是完整的。但探测本身有价值：它把「不可达」这个事实记进熔断器，
+     * 统计功能是完整的。但探测本身有价值：把「不可用」这个问题记进熔断器，
      * 于是接下来的前台请求直接走降级路径，不必每个访客各撞一次连接超时。
      *
      * @param array|null $applied 本次从配置文件读到的设置，为 null 时读数据库里已保存的

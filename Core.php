@@ -619,22 +619,12 @@ class Core
         }
 
         try {
-            $redis = new Redis();
-            $host = $this->config->redisHost ?: '127.0.0.1';
-            $port = (int)($this->config->redisPort ?: 6379);
-
-            if (!$redis->connect($host, $port, Health::CONNECT_TIMEOUT)) {
-                Health::trip(Health::REDIS);
-                return;
-            }
-
-            $password = $this->config->redisAuth ?? '';
-            if ($password !== '') {
-                $redis->auth($password);
-            }
-
-            $redis->ping();
-            $this->redis = $redis;
+            # 连接超时、读写超时统一在 Health::connect() 里设置
+            $this->redis = Health::connect(
+                $this->config->redisHost ?: '127.0.0.1',
+                (int)($this->config->redisPort ?: 6379),
+                (string)($this->config->redisAuth ?? '')
+            );
             # 连上了就立刻解除熔断，Redis 恢复后不用等窗口自然过期
             Health::clear(Health::REDIS);
         } catch (\Throwable $e) {

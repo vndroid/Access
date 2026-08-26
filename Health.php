@@ -3,6 +3,7 @@
 namespace TypechoPlugin\Access;
 
 use Redis;
+use RuntimeException;
 use Typecho\Config;
 
 if (!defined('__TYPECHO_ROOT_DIR__')) {
@@ -45,6 +46,25 @@ final class Health
      * 压到 0.5 秒后单次代价可以接受，熔断再把重复的代价也抹掉。
      */
     public const CONNECT_TIMEOUT = 0.5;
+
+    /**
+     * Redis 读写超时（秒）
+     *
+     * 连接超时管的是「连不上」，这个管的是「连上了却不回话」—— 后者更阴险：
+     * TCP 握手成功，PING / LRANGE / LTRIM / SCAN 就地卡住，
+     * 而 phpredis 默认没有读超时，于是一直等到 PHP 自己的执行时限为止。
+     * 防火墙半开连接、Redis 被大 key 阻塞、容器网络单向不通，都会走到这一步。
+     */
+    public const READ_TIMEOUT = 3.0;
+
+    /**
+     * 命令行下的超时（秒）
+     *
+     * cron 不在乎多等一会儿，宁可宽松些也别因为网络抖一下就整轮失败；
+     * 但仍然必须有上限，否则一个卡住的 Redis 能让 cron 任务永远挂着。
+     */
+    public const CLI_CONNECT_TIMEOUT = 3.0;
+    public const CLI_READ_TIMEOUT = 5.0;
 
     /** 标记文件所在目录，null 表示还没解析过 */
     private static ?string $dir = null;
@@ -133,6 +153,60 @@ final class Health
     }
 
     /**
+     * 统一建立 Redis 连接
+     *
+     * 全插件只有这一处 new Redis()：超时设置散在四个地方时，
+     * 总会漏掉一两个 —— 事实上原来 tools/flush-queue.php 就是漏网的那个。
+     *
+     * @param string $host
+     * @param int $port
+     * @param string $auth 密码，空字符串表示不需要认证
+     * @param float|null $connectTimeout 连接超时（秒），null 用 CONNECT_TIMEOUT
+     * @param float|null $readTimeout 读写超时（秒），null 用 READ_TIMEOUT
+     * @return Redis 已完成认证并 PING 通的连接
+     * @throws RuntimeException 连不上
+     * @throws \RedisException 认证或 PING 失败
+     */
+    public static function connect(
+        string $host,
+        int $port,
+        string $auth = '',
+        ?float $connectTimeout = null,
+        ?float $readTimeout = null
+    ): Redis {
+        $connectTimeout = $connectTimeout ?? self::CONNECT_TIMEOUT;
+        $readTimeout = $readTimeout ?? self::READ_TIMEOUT;
+
+        $redis = new Redis();
+
+        /*
+         * connect() 的第 6 个参数就是读超时。第 5 个是重连间隔，这里给 0：
+         * 本类已经有熔断了，再让驱动在请求里偷偷重试只会把等待成倍放大。
+         */
+        # phpredis 连接失败时既可能返回 false，也可能直接抛 RedisException，
+        # 这里统一成 RuntimeException，并且把「连的是谁」补进消息里 ——
+        # 光一句 "Connection refused" 在后台提示里没法定位
+        try {
+            $ok = @$redis->connect($host, $port, $connectTimeout, null, 0, $readTimeout);
+        } catch (\Throwable $e) {
+            throw new RuntimeException(_t('无法连接 Redis %s:%d（%s）', $host, $port, $e->getMessage()));
+        }
+        if (!$ok) {
+            throw new RuntimeException(_t('无法连接 Redis %s:%d', $host, $port));
+        }
+
+        # 连上之后再设一次：这个值对后续的惰性重连同样生效
+        $redis->setOption(Redis::OPT_READ_TIMEOUT, $readTimeout);
+
+        if ($auth !== '') {
+            $redis->auth($auth);
+        }
+        $redis->ping();
+
+        return $redis;
+    }
+
+    /**
      * 探测 Redis 是否可用
      *
      * 成功时解除熔断，失败时进入熔断 —— 于是「启用插件」这一次探测
@@ -153,16 +227,7 @@ final class Health
         }
 
         try {
-            $redis = new Redis();
-            if (!@$redis->connect($target['host'], $target['port'], self::CONNECT_TIMEOUT)) {
-                self::trip(self::REDIS);
-                return _t('无法连接 %s:%d', $target['host'], $target['port']);
-            }
-
-            if ($target['auth'] !== '') {
-                $redis->auth($target['auth']);
-            }
-            $redis->ping();
+            $redis = self::connect($target['host'], $target['port'], $target['auth']);
             $redis->close();
         } catch (\Throwable $e) {
             self::trip(self::REDIS);
