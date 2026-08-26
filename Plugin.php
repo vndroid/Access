@@ -191,7 +191,7 @@ class Plugin implements PluginInterface
             );
 
             // 使用 SCAN 迭代删除所有匹配前缀的键，避免 KEYS 阻塞
-            $prefix = 'typecho_access:*';
+            $prefix = Cache::PREFIX . '*';
             $iterator = null;
             while (($keys = $redis->scan($iterator, $prefix, 100)) !== false) {
                 if ($keepQueue) {

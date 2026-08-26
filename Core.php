@@ -37,7 +37,7 @@ class Core
     protected bool $flushScheduled = false;
 
     /** Redis 缓存键前缀 */
-    private const CACHE_PREFIX = 'typecho_access:';
+    private const CACHE_PREFIX = Cache::PREFIX;
 
     /** 历史日期的统计不会再变化，缓存 40 天足够覆盖当月图表 */
     private const PAST_DAY_TTL = 3456000;
@@ -1008,11 +1008,34 @@ class Core
      */
     public function deleteLogs(array $ids)
     {
+        // PostgreSQL 对整型列不接受非数字字面量，这里统一转成整型
+        $ids = array_values(array_filter(array_map('intval', $ids)));
+        if (empty($ids)) {
+            return;
+        }
+
+        /*
+         * 删之前先把这些记录的日期取出来：删完就查不到了，
+         * 而统计缓存必须按日期失效，否则后台还会一直显示删除前的数字。
+         */
+        $dates = [];
+        if ($this->redis !== null) {
+            try {
+                $rows = $this->db->fetchAll(
+                    $this->db->select('time')->from('table.access')
+                        ->where('id IN (' . implode(',', $ids) . ')')
+                );
+                $dates = Cache::datesOf($rows);
+            } catch (\Throwable $e) {
+            }
+        }
+
         foreach ($ids as $id) {
-            // PostgreSQL 对整型列不接受非数字字面量，这里统一转成整型
-            $this->db->query($this->db->delete('table.access')
-                    ->where('id = ?', (int)$id)
-            );
+            $this->db->query($this->db->delete('table.access')->where('id = ?', $id));
+        }
+
+        if ($this->redis !== null) {
+            Cache::invalidate($this->redis, $dates);
         }
     }
 

@@ -365,6 +365,7 @@ LUA;
         $deadline = $deadline ?? (microtime(true) + self::FLUSH_DEADLINE);
         $batchSize = Migrate::BATCH_SIZE;
         $renewAt = microtime(true) + self::LOCK_RENEW_INTERVAL;
+        $dates = [];      // 本次写进数据库的记录覆盖了哪些日期，收尾时按它失效缓存
 
         $result = [
             'attempted' => 0,
@@ -372,6 +373,7 @@ LUA;
             'invalid'   => 0,
             'rejected'  => 0,
             'dead'      => 0,
+            'invalidated' => 0,
             'stopped'   => 'empty',
             'error'     => null,
         ];
@@ -453,6 +455,16 @@ LUA;
                 $result['dead'] += self::pushDead($redis, $dead);
                 $redis->lTrim(self::KEY, count($items), -1);
 
+                # 只有真的写进去的行才会影响统计，被拒的不算
+                if ($ok > 0) {
+                    $written = empty($outcome['failed'])
+                        ? $rows
+                        : array_values(array_diff_key($rows, $rejectedRows));
+                    foreach (Cache::datesOf($written) as $date) {
+                        $dates[$date] = true;
+                    }
+                }
+
                 $result['attempted'] += count($items);
                 $result['written']   += $ok;
                 $result['invalid']   += count($items) - count($rows);
@@ -473,6 +485,12 @@ LUA;
             $result['stopped'] = 'error';
             $result['error'] = $e->getMessage();
         }
+
+        /*
+         * 放在 try 外面：中途出错时前面几批可能已经写进去了，那部分的缓存同样得失效。
+         * 数据已经变了而缓存还是旧的，比刷库失败本身更难发现。
+         */
+        $result['invalidated'] = Cache::invalidate($redis, array_keys($dates));
 
         return $result;
     }
