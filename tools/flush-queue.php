@@ -143,12 +143,13 @@ try {
         number_format($remaining)
     );
 
-    # attempted 与 written 的差额都是被丢弃的数据，必须说清楚去向
+    # attempted 与 written 的差额都没进数据库，必须说清楚去向
     if ($result['invalid'] > 0 || $result['rejected'] > 0) {
         printf(
-            "其中 %s 条 JSON 无法解析、%s 条被数据库拒绝，已从队列中丢弃。\n",
+            "其中 %s 条 JSON 无法解析、%s 条被数据库拒绝，已转入死信队列（当前积压 %s 条）。\n",
             number_format($result['invalid']),
-            number_format($result['rejected'])
+            number_format($result['rejected']),
+            number_format(Queue::deadLength($redis))
         );
     }
 

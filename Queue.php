@@ -29,6 +29,15 @@ final class Queue
     /** 待写入队列（Redis List） */
     public const KEY = 'typecho_access:queue';
 
+    /**
+     * 死信队列（Redis List）
+     *
+     * 解析不了、或者数据库明确拒绝的消息落到这里，而不是直接丢掉。
+     * 队列的确认是整批 LTRIM，做不到「只确认成功的那几条」（Redis List 不支持按位置挑着删），
+     * 所以退而求其次：裁掉之前先把失败的原样留一份证据，可以人工排查或改完再回放。
+     */
+    public const DEAD_KEY = 'typecho_access:queue:dead';
+
     /** 刷库互斥锁 */
     private const LOCK_KEY = 'typecho_access:queue:lock';
 
@@ -48,6 +57,9 @@ final class Queue
 
     /** 队列长度硬上限，超出后丢弃最旧的记录，避免数据库长时间不可用时撑爆 Redis */
     public const MAX_LENGTH = 200000;
+
+    /** 死信队列长度上限，超出后同样丢弃最旧的，避免脏数据把 Redis 撑爆 */
+    public const DEAD_MAX_LENGTH = 10000;
 
     /** 单次刷库最多处理多少条，防止一次请求耗时过长 */
     public const FLUSH_LIMIT = 5000;
@@ -130,6 +142,61 @@ final class Queue
         } catch (\Throwable $e) {
             return 0;
         }
+    }
+
+    /**
+     * 死信队列长度
+     *
+     * @param Redis $redis
+     * @return int
+     */
+    public static function deadLength(Redis $redis): int
+    {
+        try {
+            return (int)$redis->lLen(self::DEAD_KEY);
+        } catch (\Throwable $e) {
+            return 0;
+        }
+    }
+
+    /**
+     * 把写不进去的消息挪进死信队列
+     *
+     * 必须在裁剪主队列之前调用：中途挂掉的话，宁可这批消息重复处理一次，
+     * 也不能出现「主队列已裁掉、死信里又没有」的空档。
+     *
+     * @param Redis $redis
+     * @param array $entries 每项为 ['reason' => string, 'payload' => string]
+     * @return int 实际入队条数
+     */
+    private static function pushDead(Redis $redis, array $entries): int
+    {
+        if (empty($entries)) {
+            return 0;
+        }
+
+        $payloads = [];
+        $at = time();
+        foreach ($entries as $entry) {
+            $encoded = json_encode([
+                'at'      => $at,
+                'reason'  => $entry['reason'],
+                'payload' => $entry['payload'],
+            ], JSON_UNESCAPED_UNICODE);
+            if ($encoded !== false) {
+                $payloads[] = $encoded;
+            }
+        }
+        if (empty($payloads)) {
+            return 0;
+        }
+
+        $length = $redis->rPush(self::DEAD_KEY, ...$payloads);
+        if ($length !== false && $length > self::DEAD_MAX_LENGTH) {
+            $redis->lTrim(self::DEAD_KEY, -self::DEAD_MAX_LENGTH, -1);
+        }
+
+        return count($payloads);
     }
 
     /**
@@ -242,8 +309,9 @@ LUA;
     /**
      * 把队列里的数据落库
      *
-     * 先读后删：整批一条都写不进去时保留队列不裁剪，等下次重试，宁可重复也不丢数据；
-     * 数据库是通的、只有个别行写不进去（脏数据）时才连同它们一起裁掉，避免永远堵住队列。
+     * 先读后删：数据库不可用时保留队列不裁剪，等下次重试，宁可重复也不丢数据；
+     * 数据库是通的时候整批确认，写不进去的个别行先搬进死信队列再裁剪 —— 
+     * 它们留在主队列里只会永远堵着，但直接丢掉就是无声的数据丢失。
      *
      * 上限按「从队列取走的条数」(attempted) 计算，而不是按写入成功数：
      * 否则一批消息大部分写失败时 written 不增长，循环会继续吃下去，
@@ -255,9 +323,10 @@ LUA;
      * @param int $limit 本次最多处理多少条，0 表示用默认上限
      * @param float|null $deadline 墙钟截止时间（microtime 时间戳），null 表示用默认预算
      * @param string|null $token 刷库锁的 token；传入后会在批次之间续租，一旦发现锁已易主立即停手
-     * @return array{attempted:int,written:int,invalid:int,rejected:int,stopped:string,error:?string}
+     * @return array{attempted:int,written:int,invalid:int,rejected:int,dead:int,stopped:string,error:?string}
      *         attempted 取走并裁掉的消息数；written 实际入库行数；
-     *         invalid  JSON 解析失败被丢弃的条数；rejected 数据库逐行重试仍写不进去被丢弃的条数；
+     *         invalid  JSON 解析失败的条数；rejected 数据库逐行重试仍写不进去的条数；
+     *         dead     已转入死信队列的条数（invalid + rejected 都会进死信，不再无声丢弃）；
      *         恒有 invalid + rejected === attempted - written。
      *         stopped 为结束原因：
      *           empty    队列已取空（正常结束）
@@ -284,6 +353,7 @@ LUA;
             'written'   => 0,
             'invalid'   => 0,
             'rejected'  => 0,
+            'dead'      => 0,
             'stopped'   => 'empty',
             'error'     => null,
         ];
@@ -315,35 +385,60 @@ LUA;
                 }
 
                 $rows = [];
-                foreach ($items as $item) {
+                $rowItem = [];          // $rows 下标 => $items 下标，失败行要靠它找回原始消息
+                foreach ($items as $i => $item) {
                     $row = json_decode($item, true);
                     if (is_array($row)) {
+                        $rowItem[] = $i;
                         $rows[] = self::normalize($row);
                     }
                 }
 
-                // insertBatch 不抛异常，只返回实际写入行数，必须按返回值判断成败
-                $ok = empty($rows) ? 0 : Migrate::insertBatch($db, $rows, self::COLUMNS);
+                // insertBatchDetailed 不抛异常，返回写入行数和失败行下标，必须按返回值判断成败
+                $outcome = empty($rows)
+                    ? ['written' => 0, 'failed' => []]
+                    : Migrate::insertBatchDetailed($db, $rows, self::COLUMNS);
+                $ok = $outcome['written'];
 
-                if ($ok === 0 && !empty($rows)) {
-                    // 一条都没写进去，基本可以断定是数据库不可用；
-                    // 保留队列不裁剪，等下一次刷库重试，宁可重复也不丢数据
+                /*
+                 * 一条都没写进去有两种原因，光看失败数分不出来，必须探一次活：
+                 * 数据库挂了 —— 队列原样留着等下次重试；
+                 * 整批都是脏数据 —— 留着只会永远堵住队列，转进死信。
+                 * 之前这里一律当成前者，于是「队列尾部只剩一条脏数据」会让整个队列永久卡死。
+                 */
+                if ($ok === 0 && !empty($rows) && !Migrate::alive($db)) {
                     $result['stopped'] = 'db';
                     $result['error'] = sprintf(
-                        '数据库写入失败，本批 %d 条已保留在队列中等待重试',
+                        '数据库不可用，本批 %d 条已保留在队列中等待重试',
                         count($rows)
                     );
                     break;
                 }
 
-                // 走到这里说明数据库是通的：写不进去的个别行属于脏数据，
-                // 裁掉避免它们永远堵住队列
+                /*
+                 * 走到这里数据库是通的，这一批可以确认掉了。
+                 * 但确认的前提是「没写进去的那些留下了证据」：Redis List 只能整批 LTRIM，
+                 * 做不到只确认成功的几条，所以先把失败的原样搬进死信队列再裁剪。
+                 * 顺序不能反 —— 反了就是老问题：一批 1000 条只成功 1 条，另外 999 条无声消失。
+                 */
+                $rejectedRows = array_fill_keys($outcome['failed'], true);
+                $rowOfItem = array_flip($rowItem);
+                $dead = [];
+                foreach ($items as $i => $item) {
+                    if (!isset($rowOfItem[$i])) {
+                        $dead[] = ['reason' => 'invalid-json', 'payload' => $item];
+                    } elseif (isset($rejectedRows[$rowOfItem[$i]])) {
+                        $dead[] = ['reason' => 'db-rejected', 'payload' => $item];
+                    }
+                }
+
+                $result['dead'] += self::pushDead($redis, $dead);
                 $redis->lTrim(self::KEY, count($items), -1);
 
                 $result['attempted'] += count($items);
                 $result['written']   += $ok;
                 $result['invalid']   += count($items) - count($rows);
-                $result['rejected']  += count($rows) - $ok;
+                $result['rejected']  += count($outcome['failed']);
 
                 if (count($items) < $take) {
                     // 队列里已经没有更多消息了

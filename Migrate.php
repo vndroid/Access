@@ -219,8 +219,26 @@ final class Migrate
      */
     public static function insertBatch(Db $target, array $rows, array $columnList): int
     {
+        return self::insertBatchDetailed($target, $rows, $columnList)['written'];
+    }
+
+    /**
+     * 同 insertBatch()，但额外告诉调用方「哪几行没写进去」
+     *
+     * 只报总数是不够的：写入队列要靠这个决定哪些消息可以确认、哪些必须留证据，
+     * 只知道「1000 条里成功了 1 条」就只能在「整批重试」和「整批丢掉」之间二选一。
+     *
+     * @param Db $target
+     * @param array $rows
+     * @param array $columnList 要写入的字段，顺序固定
+     * @return array{written:int,failed:int[]} failed 是 $rows 中写失败的行下标（已重新索引）
+     */
+    public static function insertBatchDetailed(Db $target, array $rows, array $columnList): array
+    {
+        $rows = array_values($rows);
+        $result = ['written' => 0, 'failed' => []];
         if (empty($rows)) {
-            return 0;
+            return $result;
         }
 
         try {
@@ -237,30 +255,51 @@ final class Migrate
                 $tuples[] = self::tuple($adapter, $row, $columnList);
             }
         } catch (\Throwable $e) {
-            // 连不上或拼不出语句，一条都没写进去
-            return 0;
+            // 连不上或拼不出语句，一条都没写进去，也没有「这行有问题」的信息可给
+            return $result;
         }
 
         try {
             $target->query("INSERT INTO {$table} ({$columns}) VALUES " . implode(', ', $tuples), Db::WRITE);
-            return count($rows);
+            $result['written'] = count($rows);
+            return $result;
         } catch (\Throwable $e) {
-            // 退化为逐行，跳过写不进去的行（例如主键冲突）
+            // 退化为逐行，逐个记下写不进去的行（例如主键冲突、字段超长）
         }
 
-        $written = 0;
-        foreach ($rows as $row) {
+        foreach ($rows as $i => $row) {
             try {
                 $target->query(
                     "INSERT INTO {$table} ({$columns}) VALUES " . self::tuple($adapter, $row, $columnList),
                     Db::WRITE
                 );
-                $written++;
+                $result['written']++;
             } catch (\Throwable $e) {
+                $result['failed'][] = $i;
             }
         }
 
-        return $written;
+        return $result;
+    }
+
+    /**
+     * 连接探活
+     *
+     * 用来区分「整批都写不进去」的两种原因：数据库挂了（数据必须留着重试），
+     * 还是这一批本身就是写不进去的脏数据（留着只会永远堵住队列）。
+     * 光看写入失败数是分不出来的。
+     *
+     * @param Db $target
+     * @return bool
+     */
+    public static function alive(Db $target): bool
+    {
+        try {
+            $target->query('SELECT 1', Db::READ);
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     /**
