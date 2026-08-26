@@ -102,27 +102,53 @@ class Plugin implements PluginInterface
         $cleanFlag = false;
         $config = Options::alloc()->plugin(basename(__DIR__));
 
-        // 先把写入缓冲里积压的数据落库，避免随缓存一起被清掉
         // 把当前配置写回 config/current.yaml，下次启用时自动恢复。
-        // 写失败（目录只读等）不影响禁用流程
+        // 写失败（目录只读等）不影响禁用流程。
+        // 注意这只保住了「配置」，保不住 Redis 队列里的访客数据，那是下面一步的事。
         $saved = Settings::save($config);
 
+        /*
+         * 先尽力把写入队列刷干净，并且拿到确切结果。
+         *
+         * 这里以前调的是 flushQueue()：单次最多 FLUSH_LIMIT 条、抢不到锁直接返回 0、
+         * 返回值还被丢掉，于是「刷过一次」被当成了「刷完了」，
+         * 紧接着 clearRedisCache() 把 typecho_access:* 一把梭删掉 ——
+         * 队列里没落库的访客数据就这么无声消失了。
+         * 现在改成 drainQueue()：循环刷到取空为止，并如实回报还剩没剩。
+         */
+        $drain = ['written' => 0, 'pending' => null, 'dead' => 0, 'clean' => false, 'error' => null];
         try {
-            (new Core())->flushQueue();
+            $drain = (new Core())->drainQueue();
         } catch (\Throwable $e) {
+            $drain['error'] = $e->getMessage();
         }
 
-        // 如果 Redis 缓存为启用状态，删除所有缓存键
+        /*
+         * isDrop=1 是用户明确要求连历史数据一起删，队列里的自然也在其中；
+         * 否则只要 Redis 里还留着没落库的消息，就把队列（含死信）原样保留，
+         * 下次启用插件时会接着写入。
+         */
+        $keepQueue = $config->isDrop != 1 && !$drain['clean'];
+
+        // 如果 Redis 缓存为启用状态，删除缓存键
         if (isset($config->redisCache) && $config->redisCache == '1' && extension_loaded('redis')) {
-            self::clearRedisCache($config);
+            self::clearRedisCache($config, $keepQueue);
         }
 
+        $dropNote = '';
         if ($config->isDrop == 1) {
-            // 数据表可能位于独立数据库中，这里要按插件实际使用的连接来删
-            $db = Database::get();
-            $table = Database::driver($db)->quoteTable($db->getPrefix() . 'access');
-            $db->query("DROP TABLE IF EXISTS {$table}", Db::WRITE);
-            $cleanFlag = true;
+            try {
+                // 数据表可能位于独立数据库中，这里要按插件实际使用的连接来删
+                $db = Database::get();
+                $table = Database::driver($db)->quoteTable($db->getPrefix() . 'access');
+                $db->query("DROP TABLE IF EXISTS {$table}", Db::WRITE);
+                $cleanFlag = true;
+            } catch (\Throwable $e) {
+                // 数据库暂时连不上不该让插件卡在「停用不掉」的状态。
+                // 这条提示显示在后台通知条里，原始异常可能很长，截断后再拼
+                $reason = mb_strimwidth(trim($e->getMessage()), 0, 40, '…', 'UTF-8');
+                $dropNote = sprintf('，但数据表未能删除（%s）', $reason);
+            }
         }
         // 迁移标记存在独立的 options 行，禁用时一并清理
         try {
@@ -139,50 +165,47 @@ class Plugin implements PluginInterface
         Helper::removeRoute('access_migrate');
 
         $msg = $cleanFlag ? '插件已禁用，数据表已清除' : '插件已禁用，数据表已保留';
+        $msg .= $dropNote;
         $msg .= $saved
-            ? _t('，当前配置已写入至 current.yaml 中')
-            : _t('，配置因目录或文件不可写未能写入');
+            ? '，当前配置已写入至 current.yaml 中'
+            : '，配置因目录或文件不可写未能写入';
+        $msg .= self::drainNote($drain, $keepQueue);
 
         return _t($msg);
     }
 
     /**
-     * 清除 Redis 中所有 Access 插件的缓存键
+     * 把队列的收尾情况说清楚
      *
-     * @param mixed $config 插件配置
-     * @return void
+     * 这条提示显示在后台的通知条里，位置很窄，所以只讲两件事：
+     * 还剩多少没落库、它们去哪了。原始异常之类的细节一概不进这里。
+     *
+     * @param array $drain Core::drainQueue() 的返回值
+     * @param bool $keepQueue 是否保留了队列
+     * @return string
      */
-    private static function clearRedisCache($config): void
+    private static function drainNote(array $drain, bool $keepQueue): string
     {
-        try {
-            $redis = new \Redis();
-            $host = $config->redisHost ?: '127.0.0.1';
-            $port = (int)($config->redisPort ?: 6379);
-
-            if (!$redis->connect($host, $port, Health::CONNECT_TIMEOUT)) {
-                return;
-            }
-
-            $password = $config->redisAuth ?? '';
-            if ($password !== '') {
-                $redis->auth($password);
-            }
-
-            $redis->ping();
-
-            // 使用 SCAN 迭代删除所有匹配前缀的键，避免 KEYS 阻塞
-            $prefix = 'typecho_access:*';
-            $iterator = null;
-            while (($keys = $redis->scan($iterator, $prefix, 100)) !== false) {
-                if (!empty($keys)) {
-                    $redis->del($keys);
-                }
-            }
-
-            $redis->close();
-        } catch (\Throwable $e) {
-            // 清除失败不影响禁用流程
+        if ($drain['clean']) {
+            return $drain['written'] > 0
+                ? sprintf('，刷入积压 %s 条', number_format($drain['written']))
+                : '';
         }
+
+        if ($drain['pending'] === null) {
+            return $keepQueue ? '，Redis 状态未知，队列已保留' : '，Redis 状态未知';
+        }
+
+        # 待写入和死信都是「没进数据库的数据」，通知条里合成一个数字就够了，
+        # 死信的明细留给命令行工具
+        $left = (int)$drain['pending'] + (int)$drain['dead'];
+        if ($left === 0) {
+            return '，队列状态未确认';
+        }
+
+        return $keepQueue
+            ? sprintf('，另有 %s 条未落库已保留', number_format($left))
+            : sprintf('，另有 %s 条未落库已清除', number_format($left));
     }
 
     /**

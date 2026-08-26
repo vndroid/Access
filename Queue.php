@@ -478,6 +478,55 @@ LUA;
     }
 
     /**
+     * 这个 Redis 键装的是数据，还是可以随时重算的缓存？
+     *
+     * 队列、死信、刷库锁、上次刷库时间都属于前者：缓存删了会重算，这些删了就没了。
+     * 判断逻辑放在这里而不是调用方，是为了以后新增队列相关的键时不用四处改。
+     *
+     * @param string $key 完整键名
+     * @return bool
+     */
+    public static function isDataKey(string $key): bool
+    {
+        return str_starts_with($key, self::KEY);
+    }
+
+    /**
+     * 反复刷库直到队列取空、时间用尽或出错为止
+     *
+     * flush() 单次上限是 FLUSH_LIMIT 条，「刷了一次」不等于「刷完了」。
+     * 需要「尽量刷干净」语义的场景（比如停用插件）用这个。
+     * 调用方负责持锁：token 会一路传下去续租。
+     *
+     * @param Redis $redis
+     * @param Db $db
+     * @param string $token 刷库锁的 token
+     * @param float $deadline 墙钟截止时间（microtime 时间戳）
+     * @return array{written:int,rounds:int,stopped:string,error:?string}
+     */
+    public static function drain(Redis $redis, Db $db, string $token, float $deadline): array
+    {
+        $out = ['written' => 0, 'rounds' => 0, 'stopped' => 'empty', 'error' => null];
+
+        while (microtime(true) < $deadline) {
+            $round = self::flush($redis, $db, self::FLUSH_LIMIT, $deadline, $token);
+            $out['written'] += $round['written'];
+            $out['rounds']++;
+            $out['stopped'] = $round['stopped'];
+
+            // 只有「本轮撞到条数上限」才说明队列里还有，值得再来一轮
+            if ($round['stopped'] !== 'limit') {
+                if (in_array($round['stopped'], ['db', 'lock', 'error'], true)) {
+                    $out['error'] = $round['error'];
+                }
+                break;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * 补齐字段并保证顺序，避免不同版本的记录结构不一致导致列错位
      *
      * @param array $row

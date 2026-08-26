@@ -1247,6 +1247,77 @@ class Core
     }
 
     /**
+     * 尽力把队列刷干净，并如实回报最终状态
+     *
+     * 给「停用插件」这类一次性场景用：那里需要的不是「刷了一次」，而是
+     * 「到底还剩没剩」—— flushQueue() 单次最多 FLUSH_LIMIT 条、抢不到锁就返回 0，
+     * 拿它的返回值当作「已经刷完了」是靠不住的。
+     *
+     * @access public
+     * @param float $budget 时间预算（秒）
+     * @return array{written:int,pending:?int,dead:int,clean:bool,error:?string}
+     *         pending 为剩余积压（null 表示读不到）；dead 为死信队列当前长度；
+     *         clean 为 true 才代表「Redis 里确实没有未落库的数据了」
+     */
+    public function drainQueue(float $budget = 25.0): array
+    {
+        $out = ['written' => 0, 'pending' => null, 'dead' => 0, 'clean' => false, 'error' => null];
+
+        if (!isset($this->config->redisCache) || $this->config->redisCache != '1') {
+            # 压根没启用 Redis，自然不存在积压
+            $out['pending'] = 0;
+            $out['clean'] = true;
+            return $out;
+        }
+
+        if ($this->redis === null) {
+            # 启用了却连不上：既刷不了也确认不了，绝不能当成「干净」
+            $out['error'] = 'Redis 不可用，无法确认队列状态';
+            return $out;
+        }
+
+        if (!Queue::isEnabled($this->redis, $this->config)) {
+            $out['pending'] = Queue::tryLength($this->redis);
+            $out['dead'] = Queue::deadLength($this->redis);
+            # 写入队列被关掉了，但之前攒下的消息可能还在
+            $out['clean'] = $out['pending'] === 0 && $out['dead'] === 0;
+            return $out;
+        }
+
+        $deadline = microtime(true) + max(1.0, $budget);
+
+        # 别的请求可能正在刷，短暂重试而不是立刻放弃
+        $token = null;
+        while (microtime(true) < $deadline) {
+            $token = Queue::acquireLock($this->redis);
+            if ($token !== null) {
+                break;
+            }
+            usleep(200000);
+        }
+        if ($token === null) {
+            $out['pending'] = Queue::tryLength($this->redis);
+            $out['dead'] = Queue::deadLength($this->redis);
+            $out['error'] = '另一个进程正在刷库，未能取得刷库锁';
+            return $out;
+        }
+
+        try {
+            $drained = Queue::drain($this->redis, $this->db, $token, $deadline);
+            $out['written'] = $drained['written'];
+            $out['error'] = $drained['error'];
+        } finally {
+            Queue::releaseLock($this->redis, $token);
+        }
+
+        $out['pending'] = Queue::tryLength($this->redis);
+        $out['dead'] = Queue::deadLength($this->redis);
+        $out['clean'] = $out['error'] === null && $out['pending'] === 0 && $out['dead'] === 0;
+
+        return $out;
+    }
+
+    /**
      * 队列积压条数
      *
      * @access public
