@@ -39,6 +39,19 @@ CREATE INDEX typecho_access_entrypoint_domain ON typecho_access ("entrypoint_dom
 CREATE INDEX typecho_access_referer           ON typecho_access ("referer"          );
 CREATE INDEX typecho_access_referer_domain    ON typecho_access ("referer_domain"   );
 COMMENT ON COLUMN typecho_access."id"                IS '序号';
+-- 告诉规划器：ip 列大约有 10% 的不同值（负数 = 占表行数的比例，随表增长自动缩放）。
+--
+-- ANALYZE 是从三万行样本外推 n_distinct 的，对高基数列出了名地不准：
+-- 实测 314 万行的表真实有 45 万个不同 ip（14.3%），却被估成 22,878（0.73%）。
+-- 低估 20 倍的后果不是「差一点」而是选错计划 —— 规划器按两万多组规划哈希表，
+-- 实际要装四十几万组，超出 work_mem 后落盘重分区，
+-- 概览页那条「总计独立 IP」跑了 643 秒；估对之后走索引顺序去重，降到 1 秒。
+--
+-- 方向比精度重要：估低了会落盘慢几百倍，估高了只是多读点索引，代价不对等，
+-- 所以宁可往高取。想调准可以自己量一次：
+--   SELECT count(DISTINCT ip)::float / count(*) FROM typecho_access
+ALTER TABLE typecho_access ALTER COLUMN "ip" SET (n_distinct = -0.1);
+
 COMMENT ON COLUMN typecho_access."ua"                IS 'UA';
 COMMENT ON COLUMN typecho_access."browser_id"        IS '浏览器名称';
 COMMENT ON COLUMN typecho_access."browser_version"   IS '浏览器版本';

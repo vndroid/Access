@@ -28,7 +28,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.2.1
+ * @version 3.2.2
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
@@ -863,9 +863,18 @@ class Plugin implements PluginInterface
                 $scripts = str_replace('%charset%', 'utf8mb4', $scripts);
                 foreach (explode(';', $scripts) as $script) {
                     $script = trim($script);
-                    if ($script !== '' && strtoupper($script) !== 'COMMIT') {
-                        $db->query($script, Db::WRITE);
+                    if ($script === '' || strtoupper($script) === 'COMMIT') {
+                        continue;
                     }
+                    /*
+                     * 按分号切分是个很粗的做法：整行注释里只要出现一个分号，
+                     * 就会在注释中间切一刀，切出来的碎片全是注释、一条语句都没有。
+                     * 把它原样丢给数据库执行不合适，剥掉行注释后什么都不剩的直接跳过。
+                     */
+                    if (trim(preg_replace('/^\s*--.*$/m', '', $script)) === '') {
+                        continue;
+                    }
+                    $db->query($script, Db::WRITE);
                 }
                 $created = true;
                 $msg = _t('成功创建数据表%s，插件启用成功，', $where) . $configLink;

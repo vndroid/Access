@@ -369,6 +369,51 @@ final class Database
     }
 
     /**
+     * 读出 PostgreSQL 某一列上设置的 per-column 选项（attoptions）
+     *
+     * 目前只用来查 n_distinct。这类设置不影响正确性、只影响规划器选什么计划，
+     * 丢了不会报错也不会有任何征兆 —— 只是某条查询悄悄慢上几百倍。
+     * 正因为它是静默的，才需要能探测、能在每次启用时校验。
+     *
+     * @param Db $db
+     * @param string $table 完整表名（含前缀）
+     * @param string $column
+     * @param string $option 选项名，例如 n_distinct
+     * @return string|null 没设置、非 PostgreSQL、或探测失败时返回 null
+     */
+    public static function columnOption(Db $db, string $table, string $column, string $option): ?string
+    {
+        try {
+            if (self::driver($db) !== Driver::Pgsql) {
+                return null;
+            }
+
+            $row = $db->fetchRow($db->query(
+                "SELECT array_to_string(a.attoptions, ',') AS opts
+                   FROM pg_attribute a
+                   JOIN pg_class c ON c.oid = a.attrelid
+                   JOIN pg_namespace n ON n.oid = c.relnamespace
+                  WHERE c.relname = '{$table}'
+                    AND n.nspname = ANY (current_schemas(false))
+                    AND a.attname = '{$column}'
+                    AND NOT a.attisdropped",
+                Db::READ
+            ));
+
+            if (empty($row['opts'])) {
+                return null;
+            }
+
+            # attoptions 形如 n_distinct=-0.1,n_distinct_inherited=-0.1
+            return preg_match('/(?:^|,)' . preg_quote($option, '/') . '=([^,]+)/', (string)$row['opts'], $m)
+                ? $m[1]
+                : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
      * 某一列上是否存在「单列唯一索引」
      *
      * 按索引名去找是不够的：新建表时索引名来自 sql/*.sql（MySQL 里叫 uk_event_id），

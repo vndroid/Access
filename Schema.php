@@ -27,8 +27,9 @@ final class Schema
      *
      * 3.2.0：新增 event_id 列与其唯一索引（写入幂等）
      * 3.2.1：MySQL 的 ip 列扩到 IP_LENGTH 个字符
+     * 3.2.2：给 PostgreSQL 的 ip 列固定 n_distinct 估计
      */
-    public const VERSION = '3.2.1';
+    public const VERSION = '3.2.2';
 
     /**
      * ip 列需要的字符数
@@ -53,7 +54,31 @@ final class Schema
     private const STEPS = [
         '3.2.0' => 'toV320',
         '3.2.1' => 'toV321',
+        '3.2.2' => 'toV322',
     ];
+
+    /**
+     * 告诉 PostgreSQL：ip 列大约有这么高比例的不同值
+     *
+     * 负数表示「占表行数的比例」，会随表增长自动缩放；正数是绝对条数。
+     *
+     * 为什么必须手工指定：ANALYZE 是从三万行样本里外推 n_distinct 的，
+     * 对高基数列出了名地不准。实测一张 314 万行的表，真实不同 ip 有 45 万个
+     * （14.3%），ANALYZE 估成 22,878（0.73%）—— 低估 20 倍。
+     *
+     * 后果不是「差一点」，是选错计划：规划器按两万多组去规划哈希表，
+     * 实际要装四十几万组，超出 work_mem 后 HashAggregate 落盘重分区，
+     * 一条本该一秒的查询跑了 643 秒。估对之后规划器改走
+     * 「按 (ip, ua) 索引顺序相邻去重」，不建哈希表，耗时降到 1 秒。
+     *
+     * 取值方向比精度重要得多，两个方向的代价完全不对等：
+     *   估低了 —— 哈希表装不下，落盘，慢几百倍
+     *   估高了 —— 多读一点索引，慢一点点，有上界
+     * 所以宁可往高了取。0.1 对访问日志类的表是个偏保守的中间值；
+     * 想调准可以自己量一次再改：
+     *   SELECT count(DISTINCT ip)::float / count(*) FROM [前缀]access;
+     */
+    private const IP_N_DISTINCT = '-0.1';
 
     /**
      * 版本号存在独立的 options 行里
@@ -275,6 +300,49 @@ final class Schema
     }
 
     /**
+     * 3.2.2：给 PostgreSQL 的 ip 列固定 n_distinct 估计
+     *
+     * 只对 PostgreSQL 有意义：MySQL 和 SQLite 没有这个 per-column 选项。
+     *
+     * @param Db $target
+     * @param Driver $driver
+     * @param string $table
+     * @return void
+     */
+    private static function toV322(Db $target, Driver $driver, string $table): void
+    {
+        if ($driver !== Driver::Pgsql) {
+            return;
+        }
+
+        # 已经设过就别动，也别白跑一次 ANALYZE
+        if (Database::columnOption($target, $table, 'ip', 'n_distinct') !== null) {
+            return;
+        }
+
+        $quoted = $driver->quoteTable($table);
+
+        # 纯元数据改动，不重写表，不锁
+        $target->query(
+            "ALTER TABLE {$quoted} ALTER COLUMN \"ip\" SET (n_distinct = " . self::IP_N_DISTINCT . ")",
+            Db::WRITE
+        );
+
+        /*
+         * 这一步不能省：attoptions 只是「下次 ANALYZE 请按这个值来」，
+         * 规划器真正读的是 pg_statistic 里的 stadistinct。不跑 ANALYZE 的话
+         * 设置写进去了却毫无效果 —— 而且没有任何报错，最难查的那种。
+         */
+        $target->query("ANALYZE {$quoted}", Db::WRITE);
+
+        if (Database::columnOption($target, $table, 'ip', 'n_distinct') === null) {
+            throw new \RuntimeException(
+                'ip 列的 n_distinct 设置失败：语句执行后仍读不到该选项，请检查数据库账号是否为表的属主'
+            );
+        }
+    }
+
+    /**
      * 关键结构里缺了什么
      *
      * 只查「少了会出错」的那几项，而不是全表比对：这是每次启用都要跑的路径。
@@ -305,6 +373,18 @@ final class Schema
         $ipLength = Database::columnLength($target, $table, 'ip');
         if ($ipLength !== null && $ipLength < self::IP_LENGTH) {
             $gaps[] = sprintf('ip 列宽（当前 %d，需要 %d）', $ipLength, self::IP_LENGTH);
+        }
+
+        /*
+         * ip 列的 n_distinct（3.2.2，仅 PostgreSQL）。
+         * 它比列宽更容易悄悄丢：重建表、换统计库、跑一次迁移都会退回默认，
+         * 而且不影响正确性 —— 只是概览的「总计」从一秒变成十分钟，
+         * 没有任何报错可循。所以每次启用都实地看一眼。
+         */
+        if (Database::driver($target) === Driver::Pgsql
+            && Database::columnOption($target, $table, 'ip', 'n_distinct') === null
+        ) {
+            $gaps[] = 'ip 列的 n_distinct 估计';
         }
 
         return $gaps;
