@@ -26,9 +26,24 @@ final class Schema
      * 当前表结构的版本
      *
      * 3.2.0：新增 event_id 列与其唯一索引（写入幂等）
-     * 3.2.1：MySQL 的 ip 列扩到 39 字符（完整展开的 IPv6 最长为 39）
+     * 3.2.1：MySQL 的 ip 列扩到 IP_LENGTH 个字符
      */
     public const VERSION = '3.2.1';
+
+    /**
+     * ip 列需要的字符数
+     *
+     * 注意这一列存的**不是地址文本**，而是地址的十进制整数表示
+     * （见 Core::ip62long()，IPv4 走 ip2long，两者都落成十进制字符串）。
+     * 所以上限取决于 2^128-1 = 340282366920938463463374607431768211455，共 39 位数字，
+     * 与「完整展开的 IPv6 文本长 39 字符」只是碰巧同为 39 —— 别按文本长度去推它，
+     * 那条路会得出「IPv4-mapped 完整形式 45 字符，应该用 45」，对这个 schema 是错的。
+     *
+     * 原来的 38 会把十进制表示恰好 39 位的地址截掉末位。截掉末位等于除以 10，
+     * 存进去的是另一个看起来合法的地址。受影响的是 fc00::/7、fe80::/10、ff00::/8；
+     * 2000::/3 全球单播是 38 位，一直没事 —— 所以这个问题长期没被发现。
+     */
+    private const IP_LENGTH = 39;
 
     /**
      * 升级步骤：目标版本 => 处理方法
@@ -103,7 +118,15 @@ final class Schema
             }
 
             try {
-                self::toV320($target, $driver, $table);
+                /*
+                 * 每个升级步骤都写成幂等的（先探测、够了就返回），
+                 * 所以修复直接把它们按顺序重跑一遍，不必去猜是哪一步没做完。
+                 * 以后新增步骤只要保持幂等，这里不用动。
+                 */
+                @set_time_limit(0);
+                foreach (self::STEPS as $method) {
+                    self::$method($target, $driver, $table);
+                }
                 $result['repaired'] = $gaps;
             } catch (\Throwable $e) {
                 # 修不好就把版本号退回去，下次启用还会再试，而不是永远假装已经升级过
@@ -116,6 +139,9 @@ final class Schema
             }
             return $result;
         }
+
+        # 建索引、改列宽在大表上都要跑很久，别让执行时限把升级砍在半路
+        @set_time_limit(0);
 
         foreach (self::STEPS as $version => $method) {
             if ($stored !== null && version_compare($stored, $version, '>=')) {
@@ -197,10 +223,15 @@ final class Schema
     }
 
     /**
-     * 3.2.1：MySQL 的 char(38) 容不下 39 字符的完整展开 IPv6。
+     * 3.2.1：把 MySQL 存量表的 ip 列扩到 IP_LENGTH（原来是 38，会截断一部分 IPv6）
      *
      * PostgreSQL 的建表脚本一直是 varchar(39)，SQLite 不执行字符长度限制，
      * 因此只有 MySQL 存量表需要 ALTER。
+     *
+     * @param Db $target
+     * @param Driver $driver
+     * @param string $table
+     * @return void
      */
     private static function toV321(Db $target, Driver $driver, string $table): void
     {
@@ -208,11 +239,39 @@ final class Schema
             return;
         }
 
+        /*
+         * 先探测再改，和 toV320 一个路子，原因在这里更重：
+         * MySQL 改 CHAR 长度只能走 ALGORITHM=COPY（只有 VARCHAR 加长支持 INPLACE），
+         * 会把整表连同全部索引一起重建，期间阻塞写入 —— 而这段代码跑在
+         * 「保存插件设置」的那个 Web 请求里。
+         *
+         * 已经够宽就直接返回。这一步不是可有可无的优化：ALTER 失败时 ensure()
+         * 只把版本号记到上一步，下次保存设置会从头再来一遍；没有这道探测的话，
+         * 大表上就是每保存一次设置就重建一次表，而且永远收敛不了。
+         */
+        $length = Database::columnLength($target, $table, 'ip');
+        if ($length !== null && $length >= self::IP_LENGTH) {
+            return;
+        }
+
+        # 大表上这条语句要跑很久，别让 PHP 的执行时限在重建到一半时把它砍掉
+        @set_time_limit(0);
+
         $quoted = $driver->quoteTable($table);
         $target->query(
-            "ALTER TABLE {$quoted} MODIFY COLUMN `ip` char(39) DEFAULT '0' COMMENT 'IP'",
+            "ALTER TABLE {$quoted} MODIFY COLUMN `ip` char(" . self::IP_LENGTH . ") DEFAULT '0' COMMENT 'IP'",
             Db::WRITE
         );
+
+        # 复核一次，别让「语句没报错但列宽没变」蒙混过关（和 toV320 建完索引要复核同理）
+        $after = Database::columnLength($target, $table, 'ip');
+        if ($after !== null && $after < self::IP_LENGTH) {
+            throw new \RuntimeException(sprintf(
+                'ip 列扩宽失败：ALTER 执行后仍是 %d 个字符，需要 %d。请检查数据库账号是否有 ALTER 权限',
+                $after,
+                self::IP_LENGTH
+            ));
+        }
     }
 
     /**
@@ -236,6 +295,16 @@ final class Schema
 
         if (!Database::uniqueIndexOn($target, $table, 'event_id')) {
             $gaps[] = 'event_id 唯一索引';
+        }
+
+        /*
+         * ip 列宽（3.2.1）。窄了不会报错，只会把 fe80::/fc00:: 这类地址的
+         * 十进制表示截掉末位 —— 存成另一个看起来合法的地址，事后无从分辨。
+         * 正因为它是静默的，才更该纳入每次启用的实地校验。
+         */
+        $ipLength = Database::columnLength($target, $table, 'ip');
+        if ($ipLength !== null && $ipLength < self::IP_LENGTH) {
+            $gaps[] = sprintf('ip 列宽（当前 %d，需要 %d）', $ipLength, self::IP_LENGTH);
         }
 
         return $gaps;

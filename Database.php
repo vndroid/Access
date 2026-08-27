@@ -319,6 +319,56 @@ final class Database
     }
 
     /**
+     * 某一列声明的最大字符数
+     *
+     * 结构升级要靠它判断「这一列到底用不用改」。MySQL 改 CHAR 长度只能走
+     * ALGORITHM=COPY —— 整表连同全部索引一起重建、期间阻塞写入，
+     * 而升级跑在保存设置的那个 Web 请求里。不先探一下就发 ALTER 的话，
+     * 已经够宽的表每次保存设置都要白白重建一遍。
+     *
+     * @param Db $db
+     * @param string $table 完整表名（含前缀）
+     * @param string $column
+     * @return int|null 判定不了时返回 null：SQLite 根本不强制字符长度，
+     *                  其余情况是探测本身失败。调用方应把 null 当作「不知道」，
+     *                  而不是「没有限制」或「限制为 0」
+     */
+    public static function columnLength(Db $db, string $table, string $column): ?int
+    {
+        try {
+            $driver = self::driver($db);
+
+            if ($driver === Driver::Sqlite) {
+                # SQLite 的 char(N)/varchar(N) 只是标注，不会截断也不会报错
+                return null;
+            }
+
+            if ($driver === Driver::Mysql) {
+                # 用 SHOW COLUMNS 而不是 information_schema：不必操心当前 schema 是哪个
+                $row = $db->fetchRow($db->query(
+                    "SHOW COLUMNS FROM `{$table}` LIKE '{$column}'",
+                    Db::READ
+                ));
+                if (empty($row['Type']) || !preg_match('/\((\d+)\)/', (string)$row['Type'], $m)) {
+                    return null;
+                }
+                return (int)$m[1];
+            }
+
+            $row = $db->fetchRow($db->query(
+                "SELECT character_maximum_length AS len FROM information_schema.columns
+                  WHERE table_schema = ANY (current_schemas(false))
+                    AND table_name = '{$table}' AND column_name = '{$column}'",
+                Db::READ
+            ));
+
+            return isset($row['len']) && $row['len'] !== null ? (int)$row['len'] : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
      * 某一列上是否存在「单列唯一索引」
      *
      * 按索引名去找是不够的：新建表时索引名来自 sql/*.sql（MySQL 里叫 uk_event_id），
