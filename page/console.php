@@ -287,6 +287,25 @@ include 'table-js.php';
         return div.innerHTML;
     }
 
+    /*
+     * 能不能安全地放进 href。
+     *
+     * referer 完全由对方控制 —— 拿 curl 想发什么发什么，扫描器天天在发。
+     * escapeHtml 只防属性闭合逃逸，拦不住伪协议本身：href="javascript:..."
+     * 里没有引号也没有尖括号，转义了照样是一条点一下就执行的链接。
+     *
+     * 所以只认明确的 http:// 和 https://，其余（javascript:、data:、vbscript:、
+     * 以及 //evil.com 这种协议相对写法）一律返回 null，由调用方按纯文本渲染。
+     * 白名单而不是黑名单：伪协议的花样列不完。
+     *
+     * 先剔除控制字符再判断 —— "java\tscript:alert(1)" 这种写法浏览器是认的。
+     */
+    function safeUrl(value) {
+        var raw = String(value == null ? '' : value).trim();
+        var probe = raw.replace(/[\u0000-\u001F\u007F]/g, '').toLowerCase();
+        return (probe.indexOf('http://') === 0 || probe.indexOf('https://') === 0) ? raw : null;
+    }
+
     function formatDate(ts) {
         let d = new Date(ts * 1000);
         let pad = function(n) { return n < 10 ? '0' + n : n; };
@@ -445,6 +464,8 @@ include 'table-js.php';
                 printChart($('#chart-yesterday').removeClass('access-skeleton'), d.yesterday);
                 break;
             case 'total':
+                /* done=false 表示后台正在算，这一轮没有值可填，保持骨架屏等下一轮 */
+                if (!d.total) { break; }
                 $('#ov-total-pv').text(d.total.pv).removeClass('access-skeleton');
                 $('#ov-total-uv').text(d.total.uv).removeClass('access-skeleton');
                 $('#ov-total-ip').text(d.total.ip).removeClass('access-skeleton');
@@ -477,12 +498,26 @@ include 'table-js.php';
                     return done();
                 }
                 applySection(name, res.data);
-                /* done === false 表示这一段还没算完（目前只有当月图表会这样），继续推进 */
+                /*
+                 * done === false 表示这一段还没算完。两种情形：
+                 *   当月图表 —— 每次调用都往前推进几天，立刻再来一轮即可；
+                 *   总计     —— 值在后台重算，这边催也没用，按服务端给的
+                 *               retry_after 等一会儿再问，否则空转 60 次就放弃了。
+                 */
                 if (res.data && res.data.done === false && attempt < 60) {
+                    var wait = Math.max(0, Number(res.data.retry_after) || 0) * 1000;
+                    if (wait > 0) {
+                        return setTimeout(function () {
+                            if (token !== overviewToken) return;
+                            requestSection(name, token, attempt + 1, done);
+                        }, wait);
+                    }
                     return requestSection(name, token, attempt + 1, done);
                 }
                 if (res.data && res.data.done === false) {
-                    sectionFailed(name, '当月图表统计耗时过长，请稍后刷新继续。');
+                    sectionFailed(name, name === 'total'
+                        ? '总计仍在后台统计，请稍后刷新查看。'
+                        : '当月图表统计耗时过长，请稍后刷新继续。');
                 }
                 done();
             },
@@ -553,7 +588,26 @@ include 'table-js.php';
                             html += ' <a href="#" class="logs-filter-link right-aligned" data-filter="ip" data-value="' + escapeHtml(String(ip)) + '">[?]</a>';
                         }
                         html += '</td>';
-                        html += '<td><a target="_blank" href="' + escapeHtml(String(log.referer)) + '">' + escapeHtml(String(log.referer)) + '</a></td>';
+                        /*
+                         * 来源不是 http(s) 就不做成链接，只显示文本。
+                         * rel 三件套：noopener/noreferrer 挡反向标签劫持
+                         * （target=_blank 打开的页面能通过 opener 改写本页地址），
+                         * nofollow 免得后台页面给垃圾来源背书。
+                         */
+                        /*
+                         * href 用原始值，显示文本才解码：
+                         * 编码过的才是能用的地址，解码后可能根本不是合法 URL。
+                         * decodeURIComponent 遇到 %zz 这类残缺序列会抛异常，包一层。
+                         */
+                        let refRaw = String(log.referer == null ? '' : log.referer);
+                        let refShown = refRaw;
+                        try { refShown = decodeURIComponent(refRaw); } catch (e) {}
+                        let refHref = safeUrl(refRaw);
+                        let refText = escapeHtml(refShown);
+                        html += '<td>' + (refHref
+                            ? '<a target="_blank" rel="noopener noreferrer nofollow" href="'
+                              + escapeHtml(refHref) + '">' + refText + '</a>'
+                            : refText) + '</td>';
                         html += '<td>' + formatDate(log.time) + '</td>';
                         html += '</tr>';
                     });

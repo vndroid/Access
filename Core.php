@@ -41,6 +41,35 @@ class Core
     /** 历史日期的统计不会再变化，缓存 40 天足够覆盖当月图表 */
     private const PAST_DAY_TTL = 3456000;
 
+    /**
+     * 全表聚合的「新鲜期」（秒）
+     *
+     * 超过这个岁数就该重算了，但重算发生在响应发出之后，读的人拿到的仍是旧值。
+     * total 比 referer/pie 短，是因为它是首屏三个大数字，看着更该跟得上。
+     */
+    private const TOTAL_FRESH_TTL = 600;
+    private const LIST_FRESH_TTL = 1800;
+
+    /**
+     * 陈旧值在 Redis 里留多久（秒）
+     *
+     * 给得很长是故意的：拿一个礼拜前的总数顶一下，比让访客盯着 504 强得多。
+     * 只要有人来看，后台刷新就会把它顶成新的。
+     */
+    private const AGGREGATE_STALE_TTL = 604800;
+
+    /**
+     * 「正在重算」标记的存活时间（秒）
+     *
+     * 冷缓存时前端会反复轮询，不挡一下的话每轮询一次就多一条全表聚合在跑 ——
+     * 那正是把数据库 CPU 打满的形状。算失败时不主动清除这个标记，
+     * 让它自然过期，顺带成了失败退避。
+     */
+    private const AGGREGATE_LOCK_TTL = 300;
+
+    /** 值还没算出来时，告诉前端隔多久再来问（秒） */
+    private const AGGREGATE_RETRY_AFTER = 2;
+
     /** 匿名埋点接口每个 IP 每分钟允许的次数 */
     private const TRACK_RATE_LIMIT = 60;
 
@@ -150,10 +179,7 @@ class Core
                 'done' => true,
                 'yesterday' => $this->chartOf($this->cachedDayOverview(date('Y-m-d', strtotime('-1 day'))), 'day'),
             ],
-            'total' => [
-                'done' => true,
-                'total' => $this->cachedTotalOverview(),
-            ],
+            'total' => $this->totalSection(),
             'month' => $this->monthSection($deadline),
             'referer' => [
                 'done' => true,
@@ -247,21 +273,145 @@ class Core
     }
 
     /**
+     * 全表聚合的缓存读取：陈旧优先，重算放到响应发出之后
+     *
+     * 这几个数字（总计、来源 Top N、文章饼图）都是不带时间范围的全表聚合，
+     * 覆盖索引帮不上忙，代价随数据量线性增长且没有上界。以前它们被当成
+     * 普通缓存：命中就用、没命中就当场算 —— 于是「缓存刚好过期」这件事
+     * 决定了某个倒霉的访客要不要等上几分钟。
+     *
+     * 现在分三种情况：
+     *   新鲜   直接给
+     *   过期   还是先把旧值给出去，重算挂到 shutdown，下次来就是新的
+     *   没有   $allowDefer 为 true 时不算，回 done=false 让前端稍后再问；
+     *          为 false（一次性返回全部的老接口）时只能当场算
+     *
+     * @access protected
+     * @param string $key 缓存键（不含前缀）
+     * @param callable $compute 真正干活的闭包，返回要缓存的数据
+     * @param int $freshTtl 新鲜期（秒）
+     * @param bool $allowDefer 允许把「还没算出来」如实告诉调用方
+     * @return array{data: mixed, done: bool, retry_after: int}
+     */
+    protected function cachedAggregate(string $key, callable $compute, int $freshTtl, bool $allowDefer = false): array
+    {
+        # 没有 Redis 就没有缓存可言，也无处存中间结果，只能同步算
+        if ($this->redis === null) {
+            return ['data' => $compute(), 'done' => true, 'retry_after' => 0];
+        }
+
+        $envelope = $this->getCache($key);
+        $hasValue = is_array($envelope) && array_key_exists('data', $envelope);
+
+        if ($hasValue) {
+            if (time() - (int)($envelope['at'] ?? 0) < $freshTtl) {
+                return ['data' => $envelope['data'], 'done' => true, 'retry_after' => 0];
+            }
+            # 过期了也先给旧值，重算在后台做，读的人一秒都不用等
+            $this->refreshAggregateLater($key, $compute);
+            return ['data' => $envelope['data'], 'done' => true, 'retry_after' => 0];
+        }
+
+        if (!$allowDefer) {
+            $data = $compute();
+            $this->setCache($key, ['at' => time(), 'data' => $data], self::AGGREGATE_STALE_TTL);
+            return ['data' => $data, 'done' => true, 'retry_after' => 0];
+        }
+
+        # 一个值都没有：也绝不让浏览器在一条没有上界的查询上干等
+        $this->refreshAggregateLater($key, $compute);
+        return ['data' => null, 'done' => false, 'retry_after' => self::AGGREGATE_RETRY_AFTER];
+    }
+
+    /**
+     * 把重算挂到响应发出之后
+     *
+     * 同一时间只允许一个请求去算：冷缓存时前端每隔两秒问一次，
+     * 不挡的话每问一次就多一条全表聚合，几轮下来就把数据库压垮了。
+     *
+     * @access protected
+     * @param string $key
+     * @param callable $compute
+     * @return void
+     */
+    protected function refreshAggregateLater(string $key, callable $compute): void
+    {
+        $redis = $this->redis;
+        if ($redis === null) {
+            return;
+        }
+
+        $lockKey = Cache::key($key . ':computing');
+        try {
+            if (!$redis->set($lockKey, '1', ['nx', 'ex' => self::AGGREGATE_LOCK_TTL])) {
+                # 已经有人在算了
+                return;
+            }
+        } catch (\Throwable $e) {
+            return;
+        }
+
+        register_shutdown_function(function () use ($key, $compute, $redis, $lockKey) {
+            // 页面已经输出完毕，先把响应交给用户再慢慢算
+            if (PHP_SAPI === 'fpm-fcgi' && function_exists('fastcgi_finish_request')) {
+                @fastcgi_finish_request();
+            }
+            @set_time_limit(0);
+
+            try {
+                $data = $compute();
+                $this->setCache($key, ['at' => time(), 'data' => $data], self::AGGREGATE_STALE_TTL);
+                # 只在成功后清标记；失败就让它自然过期，免得前端每问一次就重试一次
+                $redis->del($lockKey);
+            } catch (\Throwable $e) {
+                // 算不出来不影响任何人，旧值还在，下次再说
+            }
+        });
+    }
+
+    /**
      * 带缓存的总计
+     *
+     * @access protected
+     * @param bool $allowDefer 冷缓存时是否允许回「还没算好」而不是当场算
+     * @return array{data: mixed, done: bool, retry_after: int}
+     * @throws DbException
+     */
+    protected function cachedTotalOverview(bool $allowDefer = false): array
+    {
+        return $this->cachedAggregate(
+            'overview:total',
+            fn(): array => $this->queryTotalOverview(),
+            self::TOTAL_FRESH_TTL,
+            $allowDefer
+        );
+    }
+
+    /**
+     * 总计分段
+     *
+     * 这三个数字来自不带时间范围的全表聚合，代价没有上界。冷缓存时不当场算，
+     * 而是回 done=false 让前端稍后再问 —— 真算起来可能比 nginx 的
+     * fastcgi_read_timeout 还久，那时浏览器早已 504，而 PHP 还在那儿磨，
+     * 刷新几次就把 FPM 的 worker 堆满了。
      *
      * @access protected
      * @return array
      * @throws DbException
      */
-    protected function cachedTotalOverview(): array
+    protected function totalSection(): array
     {
-        $cached = $this->getCache('overview:total');
-        if ($cached !== null) {
-            return $cached;
+        $result = $this->cachedTotalOverview(true);
+
+        if (!$result['done']) {
+            return [
+                'done' => false,
+                'retry_after' => $result['retry_after'],
+                'total' => null,
+            ];
         }
-        $data = $this->queryTotalOverview();
-        $this->setCache('overview:total', $data);
-        return $data;
+
+        return ['done' => true, 'total' => $result['data']];
     }
 
     /**
@@ -371,13 +521,23 @@ class Core
         $limit = (int)$this->config->pageSize;
         $limit = $limit > 0 ? min($limit, 50) : 20;
 
-        $cacheKey = 'overview:post_pie:top' . $limit;
-        $cached = $this->getCache($cacheKey);
-        if ($cached !== null) {
-            $this->postPie = $cached;
-            return;
-        }
+        $this->postPie = $this->cachedAggregate(
+            'overview:post_pie:top' . $limit,
+            fn(): array => $this->buildPostPie($limit),
+            self::LIST_FRESH_TTL
+        )['data'];
+    }
 
+    /**
+     * 真正把文章饼图算出来（全表 GROUP BY content_id，代价随数据量线性增长）
+     *
+     * @access protected
+     * @param int $limit
+     * @return array
+     * @throws DbException
+     */
+    protected function buildPostPie(int $limit): array
+    {
         // 统计库与内容库可能不是同一个库，无法 JOIN，改为两次查询后在 PHP 中合并
         $counts = $this->fetchContentCounts();
         $meta = $this->fetchContentMeta(array_column($counts, 'cid'));
@@ -408,8 +568,7 @@ class Core
             }
         }
 
-        $this->postPie = $series;
-        $this->setCache($cacheKey, $this->postPie);
+        return $series;
     }
 
     /**
@@ -557,7 +716,20 @@ class Core
             // 转换 IP 以便前端直接使用
             $row['ip_display'] = $this->long2ip($row['ip']);
         }
-        $list = $this->htmlEncode($this->urlDecode($list));
+        /*
+         * 这里既不转义也不解码，原样交给前端。
+         *
+         * 不转义：渲染方（page/console.php）已经逐字段 createTextNode 转过一遍，
+         * 服务端再转一次，页面上就会显示出 &#039; 这类字面量而不是引号本身。
+         *
+         * 不解码：以前这里对整个 $list 做了一遍 urlDecode，有两个毛病 ——
+         *   1) 前端对 url 还会再 decodeURIComponent 一次，等于解码两遍，
+         *      含 %2520 的地址会被还原成一个根本不存在的 URL；
+         *   2) 它把 path 也一起解码了，而 path 同时是「按路径筛选」的取值，
+         *      回传给服务端后要跟库里的原始值比对 —— 库里存的是编码过的，
+         *      解码过的自然就对不上，含 %20 的路径永远筛不出东西。
+         * 解码只关乎显示，交给渲染层按字段决定，服务端别一刀切。
+         */
         $rows = (int)$this->db->fetchAll($qcount)[0]['count'];
 
         $filterArr = ['filter' => $filter];
@@ -697,29 +869,36 @@ class Core
      */
     protected function parseReferer()
     {
+        /*
+         * 下面两段都只做 URL 解码、不做 HTML 转义，理由同 getLogsData()：
+         * 这些值只经 JSON 接口出去，console.php 渲染时已经逐字段转义过。
+         * 服务端再转一次，来源里带引号的 URL 就会显示成 &#039; 这种字面量 ——
+         * 扫描器把 SQL 注入探测串塞进 Referer 头时尤其明显。
+         */
+
+        $limit = $this->config->pageSize;
+
         // ── 来源 URL ──
-        $cachedUrl = $this->getCache('referer:url');
-        if ($cachedUrl !== null) {
-            $this->referer['url'] = $cachedUrl;
-        } else {
-            $this->referer['url'] = $this->db->fetchAll($this->db->select('DISTINCT entrypoint AS value, COUNT(1) as count')
-                ->from('table.access')->where("entrypoint <> ''")->group('entrypoint')
-                ->order('count', Db::SORT_DESC)->limit($this->config->pageSize));
-            $this->referer['url'] = $this->htmlEncode($this->urlDecode($this->referer['url']));
-            $this->setCache('referer:url', $this->referer['url']);
-        }
+        $this->referer['url'] = $this->cachedAggregate(
+            'referer:url',
+            fn(): array => $this->urlDecode($this->db->fetchAll(
+                $this->db->select('DISTINCT entrypoint AS value, COUNT(1) as count')
+                    ->from('table.access')->where("entrypoint <> ''")->group('entrypoint')
+                    ->order('count', Db::SORT_DESC)->limit($limit)
+            )),
+            self::LIST_FRESH_TTL
+        )['data'];
 
         // ── 来源域名 ──
-        $cachedDomain = $this->getCache('referer:domain');
-        if ($cachedDomain !== null) {
-            $this->referer['domain'] = $cachedDomain;
-        } else {
-            $this->referer['domain'] = $this->db->fetchAll($this->db->select('DISTINCT entrypoint_domain AS value, COUNT(1) as count')
-                ->from('table.access')->where("entrypoint_domain <> ''")->group('entrypoint_domain')
-                ->order('count', Db::SORT_DESC)->limit($this->config->pageSize));
-            $this->referer['domain'] = $this->htmlEncode($this->urlDecode($this->referer['domain']));
-            $this->setCache('referer:domain', $this->referer['domain']);
-        }
+        $this->referer['domain'] = $this->cachedAggregate(
+            'referer:domain',
+            fn(): array => $this->urlDecode($this->db->fetchAll(
+                $this->db->select('DISTINCT entrypoint_domain AS value, COUNT(1) as count')
+                    ->from('table.access')->where("entrypoint_domain <> ''")->group('entrypoint_domain')
+                    ->order('count', Db::SORT_DESC)->limit($limit)
+            )),
+            self::LIST_FRESH_TTL
+        )['data'];
     }
 
     /**
@@ -778,15 +957,9 @@ class Core
             $this->setCache($monthCacheKey, $this->overview['month']);
         }
 
-        // ── 总计数据：按 TTL 缓存 ──
-        $totalCacheKey = 'overview:total';
-        $cached = $this->getCache($totalCacheKey);
-        if ($cached !== null) {
-            $this->overview['total'] = $cached;
-        } else {
-            $this->overview['total'] = $this->queryTotalOverview();
-            $this->setCache($totalCacheKey, $this->overview['total']);
-        }
+        // ── 总计数据：陈旧优先，过期后台重算（见 cachedAggregate()） ──
+        # 这条路是一次性返回全部的老接口，没法回「还没算好」，所以不允许延迟
+        $this->overview['total'] = $this->cachedTotalOverview()['data'];
 
         # 输出用于图表的Json
         $this->overview['chart_data'] = $this->makeChartJson();
@@ -940,6 +1113,12 @@ class Core
     /**
      * 编码数组中的字符串为 HTML 实体
      *
+     * 注意：**不要拿它处理 JSON 接口的返回值**。控制台是前端渲染的，
+     * page/console.php 里每个字段都过了 createTextNode 转义；这里再转一遍
+     * 就是转两遍，页面上会显示出 &#039; &quot; 这类字面量而不是引号本身。
+     * 转义属于渲染那一层，接口只负责给数据。
+     * 留着它是给将来可能出现的服务端渲染路径用的。
+     *
      * @param array|string $data 将要被编码的数据
      * @param bool $valuesOnly 是否只编码数组数值
      * @param string $charset 字符串编码方式
@@ -981,7 +1160,15 @@ class Core
             }
             $data = $d;
         } elseif (is_string($data)) {
-            $data = urldecode($data);
+            /*
+             * rawurldecode 而不是 urldecode：后者会把 + 当成空格。
+             * 那是 application/x-www-form-urlencoded 的规矩，只在查询串里成立；
+             * 路径里的 + 就是一个普通加号，/c++tutorial 会被解成 /c  tutorial。
+             * 代价是查询串里真正表示空格的 + 会原样显示 —— 显示成加号只是不够好看，
+             * 把路径改错则是把地址变成了另一个地址，两者不对等。
+             * 顺带和前端的 decodeURIComponent 对齐了，它同样不动 +。
+             */
+            $data = rawurldecode($data);
         }
         return $data;
     }

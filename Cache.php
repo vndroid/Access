@@ -23,9 +23,6 @@ final class Cache
      */
     public const BASE = 'typecho_access:';
 
-    /** post_pie 的 Top N 取自 pageSize，被夹在 1..50 之间 */
-    private const POST_PIE_MAX = 50;
-
     /** 站点指纹算一次就够，一次请求里会用上几十遍 */
     private static ?string $prefix = null;
 
@@ -138,18 +135,25 @@ final class Cache
      */
     private static function staleKeys(array $dates): array
     {
-        # 只要有数据变动，这几项必然跟着变
-        $names = ['overview:total', 'referer:url', 'referer:domain'];
-
         /*
-         * post_pie 的键名带 Top N，N = min(pageSize, 50)，改过 pageSize 就会留下多个变体。
-         * 一共只有 50 个可能值，全列出来一次 DEL 掉，比 SCAN 便宜得多 ——
-         * SCAN 的代价随整个 Redis 的键数量增长，而刷库是每分钟都在发生的事。
+         * 这里只列「按日期算的」键。
+         *
+         * 全表聚合（overview:total、referer:*、overview:post_pie:*）以前也在这个
+         * 名单里，那是一个会自我拆台的设计：控制台按 today → yesterday → total →
+         * referer → pie → month 的顺序逐段请求，而第一段 today 会同步刷一次队列，
+         * 刷完就走到这里，把后面三段要用的缓存全删掉 —— 于是每打开一次控制台，
+         * 最贵的四个全表聚合都要从头算一遍，缓存等于不存在。
+         * 实测 DISTINCT ip 单次 228 秒，占了整个库 75% 的时间，控制台稳定 504。
+         *
+         * 这些数字本来也不需要即时精确：新写入的几条访问对「总计」是个零头，
+         * 差几分钟无所谓。改为各自带 TTL + 陈旧优先（见 Core::cachedAggregate()），
+         * 由读取方决定什么时候刷新，而不是由写入方粗暴地删掉。
+         *
+         * 按日期的键必须留着：跨零点之后才把前一天的队列写进数据库时，
+         * 前一天的统计会带着错误数字挂到 TTL 自然过期为止（最长 40 天）。
+         * 当初加失效逻辑就是为了这个。
          */
-        for ($n = 1; $n <= self::POST_PIE_MAX; $n++) {
-            $names[] = 'overview:post_pie:top' . $n;
-        }
-
+        $names = [];
         $months = [];
         foreach (array_unique($dates) as $date) {
             $names[] = 'overview:dayfull:' . $date;
