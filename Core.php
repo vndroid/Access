@@ -878,12 +878,19 @@ class Core
 
         $limit = $this->config->pageSize;
 
+        /*
+         * 只统计「看起来是来源地址」的记录，理由见 plausibleUrl()。
+         * 过滤必须放在 SQL 里而不是取回来再筛：Top N 是数据库排序取前几名，
+         * 而垃圾来源往往被扫描器刷出很高的次数、正好占着前排。
+         */
+        $urlOk = $this->urlLikeCondition('entrypoint');
+
         // ── 来源 URL ──
         $this->referer['url'] = $this->cachedAggregate(
             'referer:url',
             fn(): array => $this->urlDecode($this->db->fetchAll(
                 $this->db->select('DISTINCT entrypoint AS value, COUNT(1) as count')
-                    ->from('table.access')->where("entrypoint <> ''")->group('entrypoint')
+                    ->from('table.access')->where("entrypoint <> '' AND {$urlOk}")->group('entrypoint')
                     ->order('count', Db::SORT_DESC)->limit($limit)
             )),
             self::LIST_FRESH_TTL
@@ -1229,6 +1236,65 @@ class Core
     }
 
     /**
+     * 这个值看起来像不像一个来源地址
+     *
+     * Referer 头完全由对方控制，扫描器每天都在往里塞各种探测串
+     * （`(select(0)from(select(sleep(15)))v)`、`if(now()=sysdate(),sleep(15),0)` 之类）。
+     * 它们会被当成一次「来源」记下来，然后堂而皇之地出现在来源 Top 20 里。
+     *
+     * 这里用白名单而不是黑名单，理由是黑名单在这件事上必然失败：
+     * payload 的花样是无穷的，而且拿 sleep/select/union 这类关键词去匹配，
+     * 迟早会误伤查询串里带这些词的正常地址。
+     * 真正该问的从来不是「它像不像攻击」，而是「它是不是一个来源地址」——
+     * 后者有明确定义：带 scheme 和主机名的绝对 http(s) URL，中间没有空白字符。
+     * 上面那两个 payload 连 http:// 都没有，第一关就过不去。
+     *
+     * @access public
+     * @param string|null $value
+     * @return string 合格返回原值，不合格返回空串
+     */
+    public static function plausibleUrl(?string $value): string
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return '';
+        }
+
+        # 合法 URL 里不会有空白和控制字符；有就说明这是被塞进来的东西
+        if (preg_match('/[\s\x00-\x1F\x7F]/', $value) === 1) {
+            return '';
+        }
+
+        if (preg_match('~^https?://~i', $value) !== 1) {
+            return '';
+        }
+
+        # 有 scheme 还不够，还得真解析得出主机名（挡住 http:// 后面空着的情况）
+        $host = parse_url($value, PHP_URL_HOST);
+        return ($host === null || $host === false || $host === '') ? '' : $value;
+    }
+
+    /**
+     * plausibleUrl() 的 SQL 版本，用来过滤已经存进库里的旧数据
+     *
+     * 写入侧从此不会再收下这些值，但库里已经躺着的那些还得靠这一条挡住。
+     * 两处是同一条规则的两种实现，改一个记得改另一个 ——
+     * 之所以要有 SQL 版，是因为 Top N 是在数据库里排序取前几名的：
+     * 垃圾来源往往被扫描器刷出很高的次数，正好占着前排，
+     * 取回 PHP 再过滤的话，取到手的二十条可能被筛得只剩几条。
+     *
+     * @access protected
+     * @param string $column
+     * @return string
+     */
+    protected function urlLikeCondition(string $column): string
+    {
+        # LIKE 里的 _ 是「任意单个字符」，用它要求 scheme 后面至少还有点东西，
+        # 免得放过 'http://' 这种光有协议头、没有主机名的值
+        return "({$column} LIKE 'http://_%' OR {$column} LIKE 'https://_%') AND {$column} NOT LIKE '% %'";
+    }
+
+    /**
      * 获取首次进入网站时的来源
      *
      * @access public
@@ -1240,6 +1306,15 @@ class Core
         if ($entrypoint == null) {
             $entrypoint = Cookie::get('__typecho_access_entrypoint') ?: '';
         }
+
+        /*
+         * 先过一遍白名单再谈别的。
+         * 这一步同时挡住了一个更烦人的后果：下面会把 entrypoint 写进 cookie，
+         * 不拦的话，一个扫描器塞进来的 payload 会被它自己的后续每一次请求
+         * 反复带回来，一条垃圾变成一串垃圾。
+         */
+        $entrypoint = self::plausibleUrl($entrypoint);
+
         if (parse_url($entrypoint, PHP_URL_HOST) == parse_url(Helper::options()->siteUrl, PHP_URL_HOST)) {
             $entrypoint = '';
         }
