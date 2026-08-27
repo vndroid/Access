@@ -13,6 +13,13 @@
  *   --batch=1000              每批迁移的行数，默认 1000
  *   --yes                     跳过确认，直接开始
  *   --dry-run                 只显示待迁移数量，不写入
+ *   --forget-failed           清掉「写不进目标库」的行记录，之后可以重新标记完成
+ *                             （这些行不会被补写，等于确认放弃它们）
+ *
+ * 退出码：
+ *   0  迁移完成，或本来就没有需要迁移的数据
+ *   1  环境或连接问题
+ *   2  尚未完成（被打断、或有行写不进目标库），重新执行即可继续
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -113,10 +120,32 @@ try {
     out('目标 ' . $target->getAdapterName() . '  ' . $targetTable
         . '  已有 ' . number_format($migrated) . ' 行（迁移区间内）');
     out('待迁移 ' . number_format($pending) . ' 行');
+
+    $fingerprint = Migrate::fingerprint($dbSettings);
+
+    if (!empty($argvOptions['forget-failed'])) {
+        $forgotten = count(Migrate::failures($main, $fingerprint));
+        Migrate::clearFailures($main, $fingerprint);
+        out(sprintf('已清掉 %s 行失败记录（这些行不会被补写）。', number_format($forgotten)));
+    }
+
+    $known = Migrate::failures($main, $fingerprint);
+    if (!empty($known)) {
+        out(sprintf(
+            '其中 %s 行此前写入失败，未标记完成：%s%s',
+            number_format(count($known)),
+            implode(', ', array_slice($known, 0, 20)),
+            count($known) > 20 ? ' …' : ''
+        ));
+    }
     out();
 
     if ($pending === 0) {
-        Migrate::mark($main, Migrate::fingerprint($dbSettings));
+        if (!empty($known)) {
+            # 行数对上了但失败记录还在，说明那几行是人工补进去的，顺手把记录清掉
+            Migrate::clearFailures($main, $fingerprint);
+        }
+        Migrate::mark($main, $fingerprint);
         out('没有需要迁移的数据，已标记为完成。');
         exit(0);
     }
@@ -142,6 +171,7 @@ try {
 
     $result = Migrate::run($main, $target, [
         'batchSize' => $batch,
+        'fingerprint' => $fingerprint,
         'progress' => function (int $done, int $all, int $lastId) use ($startedAt, &$lastPrint) {
             $now = microtime(true);
             // 每秒最多刷新一次，避免刷屏
@@ -166,14 +196,33 @@ try {
     ]);
 
     out();
-    if ($result['done']) {
-        Migrate::mark($main, Migrate::fingerprint($dbSettings));
+
+    # 只要有行写不进去就不能标记完成，否则源表从此不会再被看一眼
+    $stuck = Migrate::failures($main, $fingerprint);
+
+    if ($result['done'] && empty($stuck)) {
+        Migrate::mark($main, $fingerprint);
         out(sprintf(
             '迁移完成，本次写入 %s 行，耗时 %s。',
             number_format($result['moved']),
             gmdate('H:i:s', (int)(microtime(true) - $startedAt))
         ));
         out('主库中的旧数据未做改动，确认无误后可自行删除 ' . $main->getPrefix() . 'access 表。');
+    } elseif (!empty($stuck)) {
+        out(sprintf('本次写入 %s 行。', number_format($result['moved'])));
+        fwrite(STDERR, sprintf(
+            "有 %s 行写不进统计数据库，迁移未标记为完成。\n",
+            number_format(count($stuck))
+        ));
+        fwrite(STDERR, '源表中对应的行 id：' . implode(', ', array_slice($stuck, 0, 50))
+            . (count($stuck) > 50 ? ' …' : '') . "\n");
+        fwrite(STDERR, "常见原因是这些行超出目标表的列宽或类型限制。修好之后重新执行本脚本会继续处理剩下的部分；\n");
+        fwrite(STDERR, "确认这些行可以放弃时，用 --forget-failed 清掉记录再执行。\n");
+        exit(2);
+    } elseif ($result['error'] !== null) {
+        out(sprintf('本次写入 %s 行。', number_format($result['moved'])));
+        fwrite(STDERR, $result['error'] . "\n");
+        exit(2);
     } else {
         out(sprintf('本次写入 %s 行，尚未完成，重新执行本脚本即可继续。', number_format($result['moved'])));
         exit(2);

@@ -30,8 +30,31 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  */
 final class Queue
 {
+    /**
+     * 队列相关键的名字（不含前缀）
+     *
+     * 完整键名由 Cache::key() 补上带站点指纹的前缀，所以这里全部是方法而不是常量：
+     * 常量在编译期定型，写死的话多个站点共用一个 Redis 就会共用同一条队列。
+     */
+    private const NAME = 'queue';
+    private const NAME_PROCESSING = 'queue:processing';
+    private const NAME_DEAD = 'queue:dead';
+    private const NAME_LOCK = 'queue:lock';
+    private const NAME_LAST_FLUSH = 'queue:last_flush';
+
+    /**
+     * 加站点指纹之前用过的固定键名
+     *
+     * 升级之后队列会换到新键名上，这几个键里可能还压着没落库的访问日志。
+     * adoptLegacy() 负责把它们接管过来，不接管就等于丢数据。
+     */
+    private const LEGACY_PREFIX = 'typecho_access:queue';
+
     /** 待写入队列（Redis List） */
-    public const KEY = 'typecho_access:queue';
+    public static function key(): string
+    {
+        return Cache::key(self::NAME);
+    }
 
     /**
      * 正在写库的一批（Redis List）
@@ -39,7 +62,10 @@ final class Queue
      * 消费者不再「读了之后按位置裁掉」，而是用一段 Lua 把消息原子地从主队列搬到这里，
      * 写库成功再从这里清掉。中途崩掉的话数据留在这里，下一次刷库会先把它捡回来。
      */
-    public const PROCESSING_KEY = 'typecho_access:queue:processing';
+    public static function processingKey(): string
+    {
+        return Cache::key(self::NAME_PROCESSING);
+    }
 
     /**
      * 死信队列（Redis List）
@@ -48,13 +74,22 @@ final class Queue
      * 队列的确认是整批 LTRIM，做不到「只确认成功的那几条」（Redis List 不支持按位置挑着删），
      * 所以退而求其次：裁掉之前先把失败的原样留一份证据，可以人工排查或改完再回放。
      */
-    public const DEAD_KEY = 'typecho_access:queue:dead';
+    public static function deadKey(): string
+    {
+        return Cache::key(self::NAME_DEAD);
+    }
 
     /** 刷库互斥锁 */
-    private const LOCK_KEY = 'typecho_access:queue:lock';
+    private static function lockKey(): string
+    {
+        return Cache::key(self::NAME_LOCK);
+    }
 
     /** 上次刷库时间 */
-    private const LAST_FLUSH_KEY = 'typecho_access:queue:last_flush';
+    private static function lastFlushKey(): string
+    {
+        return Cache::key(self::NAME_LAST_FLUSH);
+    }
 
     /**
      * 锁的存活时间（秒），防止刷库进程挂掉后死锁
@@ -97,7 +132,7 @@ final class Queue
         'browser_id' => 32, 'browser_version' => 32,
         'os_id' => 32, 'os_version' => 32,
         'url' => 255, 'path' => 255, 'query_string' => 255,
-        'ip' => 38,
+        'ip' => 39,
         'entrypoint' => 255, 'entrypoint_domain' => 100,
         'referer' => 255, 'referer_domain' => 100,
         'robot_id' => 32, 'robot_version' => 32,
@@ -134,9 +169,9 @@ final class Queue
      * 下一轮会把同一批再写一遍。有了这个标识，重复的那次会被唯一索引挡下来，
      * 于是「至少一次」的投递变成了「恰好一次」的结果。
      *
-     * 前 16 位十六进制是毫秒时间戳（左移后补随机位），后 16 位纯随机：
-     * 时间在前使得新生成的标识单调递增，唯一索引的写入集中在 B+ 树右端，
-     * 不会像纯随机标识那样每次插入都落到随机页上。
+     * 前 16 位十六进制是毫秒时间戳左移后补 16 位随机数，后 16 位纯随机：
+     * 时间在前使得标识按毫秒聚簇，唯一索引的写入集中在 B+ 树右端附近，
+     * 不会像纯随机标识那样每次插入都落到全表的随机页上。同一毫秒内仍是随机顺序。
      *
      * @return string 32 个十六进制字符
      */
@@ -188,14 +223,14 @@ final class Queue
                 return false;
             }
 
-            $length = $redis->rPush(self::KEY, $payload);
+            $length = $redis->rPush(self::key(), $payload);
             if ($length === false) {
                 return false;
             }
 
             // 超出硬上限时丢掉最旧的部分，保留最新的 MAX_LENGTH 条
             if ($length > self::MAX_LENGTH) {
-                $redis->lTrim(self::KEY, -self::MAX_LENGTH, -1);
+                $redis->lTrim(self::key(), -self::MAX_LENGTH, -1);
             }
 
             return true;
@@ -233,8 +268,8 @@ final class Queue
     public static function tryLength(Redis $redis): ?int
     {
         try {
-            $queue = $redis->lLen(self::KEY);
-            $processing = $redis->lLen(self::PROCESSING_KEY);
+            $queue = $redis->lLen(self::key());
+            $processing = $redis->lLen(self::processingKey());
             if ($queue === false || $processing === false) {
                 return null;
             }
@@ -255,7 +290,7 @@ final class Queue
     public static function processingLength(Redis $redis): int
     {
         try {
-            return (int)$redis->lLen(self::PROCESSING_KEY);
+            return (int)$redis->lLen(self::processingKey());
         } catch (\Throwable $e) {
             return 0;
         }
@@ -270,7 +305,7 @@ final class Queue
     public static function deadLength(Redis $redis): int
     {
         try {
-            return (int)$redis->lLen(self::DEAD_KEY);
+            return (int)$redis->lLen(self::deadKey());
         } catch (\Throwable $e) {
             return 0;
         }
@@ -285,9 +320,16 @@ final class Queue
      * 就是新写进来、还没落库的消息 —— 无声丢数据。
      * Redis 执行脚本期间不处理别的命令，读和裁之间就没有缝可插了。
      *
+     * 脚本内部的顺序是「先写 processing，后裁主队列」，不能反过来。
+     * Lua 脚本只保证不被别的命令打断，不保证出错回滚：先裁后写的话，
+     * 一旦 RPUSH 中途失败（processing 键类型不对等），消息就同时不在主队列
+     * 也不在 processing —— 无声丢失。反过来最坏只是主队列里留下副本，
+     * 下一轮重新取到，由 event_id 的唯一索引挡掉重复。
+     *
      * @param Redis $redis
      * @param int $count 最多取多少条
      * @return array 取到的原始消息，顺序与队列一致
+     * @throws \RuntimeException 脚本执行失败时抛出，绝不能当成「队列已空」
      */
     private static function claim(Redis $redis, int $count): array
     {
@@ -296,14 +338,26 @@ local items = redis.call('LRANGE', KEYS[1], 0, ARGV[1] - 1)
 if #items == 0 then
     return items
 end
-redis.call('LTRIM', KEYS[1], #items, -1)
 for i = 1, #items do
     redis.call('RPUSH', KEYS[2], items[i])
 end
+redis.call('LTRIM', KEYS[1], #items, -1)
 return items
 LUA;
 
-        $items = $redis->eval($script, [self::KEY, self::PROCESSING_KEY, $count], 2);
+        $items = $redis->eval($script, [self::key(), self::processingKey(), $count], 2);
+
+        /*
+         * eval 出错时 phpredis 返回 false。以前这里 `is_array($items) ? $items : []`
+         * 把失败翻译成空数组，flush() 于是判定 stopped=empty 正常收工、退出码 0 ——
+         * 一条丢数据的路径连告警都没有。失败必须显式抛出。
+         */
+        if ($items === false) {
+            $error = $redis->getLastError();
+            $redis->clearLastError();
+            throw new \RuntimeException('从队列取数失败：' . ($error !== null && $error !== '' ? $error : '未知错误'));
+        }
+
         return is_array($items) ? $items : [];
     }
 
@@ -318,7 +372,7 @@ LUA;
      */
     private static function leftover(Redis $redis): array
     {
-        $items = $redis->lRange(self::PROCESSING_KEY, 0, -1);
+        $items = $redis->lRange(self::processingKey(), 0, -1);
         return is_array($items) ? $items : [];
     }
 
@@ -328,9 +382,14 @@ LUA;
      * 必须在裁剪主队列之前调用：中途挂掉的话，宁可这批消息重复处理一次，
      * 也不能出现「主队列已裁掉、死信里又没有」的空档。
      *
+     * 写不进死信队列时抛异常而不是返回条数：调用方拿到条数之后会无条件
+     * 裁掉 processing，于是「没进死信、也没进数据库」的消息被无声删除 ——
+     * 这正是死信队列本身要防的事。抛出去让整批留在 processing 等下次重试。
+     *
      * @param Redis $redis
      * @param array $entries 每项为 ['reason' => string, 'payload' => string]
      * @return int 实际入队条数
+     * @throws \RuntimeException 死信队列写入失败时抛出，调用方不得确认本批
      */
     private static function pushDead(Redis $redis, array $entries): int
     {
@@ -341,22 +400,43 @@ LUA;
         $payloads = [];
         $at = time();
         foreach ($entries as $entry) {
+            /*
+             * payload 是访客可控数据，可能不是合法 UTF-8，默认参数下 json_encode 会返回 false。
+             * 以前这里静默跳过，可这条消息随后照样被裁掉 —— 又是一条无声丢失。
+             * 先让非法字节被替换掉（内容仍可辨认），再退到 base64 保留原始字节。
+             */
             $encoded = json_encode([
                 'at'      => $at,
                 'reason'  => $entry['reason'],
                 'payload' => $entry['payload'],
-            ], JSON_UNESCAPED_UNICODE);
-            if ($encoded !== false) {
-                $payloads[] = $encoded;
+            ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+
+            if ($encoded === false) {
+                $encoded = json_encode([
+                    'at'          => $at,
+                    'reason'      => $entry['reason'] . '+unencodable',
+                    'payload_b64' => base64_encode((string)$entry['payload']),
+                ]);
             }
-        }
-        if (empty($payloads)) {
-            return 0;
+
+            if ($encoded === false) {
+                # 连 base64 都编码不出来说明结构本身异常，不能当作「已处理」放行
+                throw new \RuntimeException('死信队列消息无法编码，本批不予确认');
+            }
+
+            $payloads[] = $encoded;
         }
 
-        $length = $redis->rPush(self::DEAD_KEY, ...$payloads);
-        if ($length !== false && $length > self::DEAD_MAX_LENGTH) {
-            $redis->lTrim(self::DEAD_KEY, -self::DEAD_MAX_LENGTH, -1);
+        $length = $redis->rPush(self::deadKey(), ...$payloads);
+        if ($length === false) {
+            throw new \RuntimeException(sprintf(
+                '死信队列写入失败（%d 条），本批保留在 processing 中等待重试',
+                count($payloads)
+            ));
+        }
+
+        if ($length > self::DEAD_MAX_LENGTH) {
+            $redis->lTrim(self::deadKey(), -self::DEAD_MAX_LENGTH, -1);
         }
 
         return count($payloads);
@@ -381,10 +461,10 @@ LUA;
                 return true;
             }
 
-            $last = (int)$redis->get(self::LAST_FLUSH_KEY);
+            $last = (int)$redis->get(self::lastFlushKey());
             if ($last <= 0) {
                 // 没有记录过，先打上时间戳，下一轮再按间隔判断
-                $redis->set(self::LAST_FLUSH_KEY, time());
+                $redis->set(self::lastFlushKey(), time());
                 return false;
             }
 
@@ -407,7 +487,7 @@ LUA;
     {
         try {
             $token = bin2hex(random_bytes(16));
-            $ok = $redis->set(self::LOCK_KEY, $token, ['nx', 'ex' => self::LOCK_TTL]);
+            $ok = $redis->set(self::lockKey(), $token, ['nx', 'ex' => self::LOCK_TTL]);
             return $ok ? $token : null;
         } catch (\Throwable $e) {
             return null;
@@ -435,7 +515,7 @@ else
     return 0
 end
 LUA;
-            return (int)$redis->eval($script, [self::LOCK_KEY, $token, self::LOCK_TTL], 1) === 1;
+            return (int)$redis->eval($script, [self::lockKey(), $token, self::LOCK_TTL], 1) === 1;
         } catch (\Throwable $e) {
             return false;
         }
@@ -464,7 +544,7 @@ else
     return 0
 end
 LUA;
-            $redis->eval($script, [self::LOCK_KEY, $token], 1);
+            $redis->eval($script, [self::lockKey(), $token], 1);
         } catch (\Throwable $e) {
         }
     }
@@ -496,8 +576,10 @@ LUA;
      *           limit    达到条数上限，队列中仍有积压
      *           deadline 达到时间上限，队列中仍有积压
      *           db       数据库不可用，本批已保留在队列中等待重试
-     *           lock     刷库锁已经不在自己手上，为避免多消费者并发而主动停手
-     *           error    Redis 或其它异常，详见 error
+     *           lock     刷库锁已经不在自己手上，为避免多消费者并发而主动停手；
+     *                    未确认的那一批不计入 attempted/written，下次刷库会重放它
+     *           error    Redis 或其它异常（含死信写入失败、claim 脚本出错），详见 error；
+     *                    未确认的批次同样留在 processing 里等下次重放
      */
     public static function flush(
         Redis $redis,
@@ -587,13 +669,53 @@ LUA;
                     break;
                 }
 
+                $rejectedRows = array_fill_keys($outcome['failed'], true);
+
                 /*
-                 * 走到这里数据库是通的，这一批可以确认掉了。
+                 * 缓存失效的登记放在确认之前：这些行已经躺在数据库里了，
+                 * 后面无论因为什么原因没能确认这一批，缓存该失效的照样得失效。
+                 * 数据变了而缓存没变，比刷库失败本身更难发现。
+                 */
+                if ($ok > 0) {
+                    $written = empty($outcome['failed'])
+                        ? $rows
+                        : array_values(array_diff_key($rows, $rejectedRows));
+                    foreach (Cache::datesOf($written) as $date) {
+                        $dates[$date] = true;
+                    }
+                }
+
+                /*
+                 * 动 processing 之前最后一次确认锁还在自己手上。
+                 *
+                 * 循环顶部那次续租挡不住这个场景：整批 INSERT 失败会退化成
+                 * 逐行写，一批 BATCH_SIZE 条就是上千次数据库往返，慢库上足以超过
+                 * LOCK_TTL。锁一过期，另一个消费者拿到锁、读到同一个 processing，
+                 * 两边再各自按 count($items) 做位置 LTRIM —— 后动手的那次砍掉的
+                 * 就是对方刚取走、还没落库的消息。
+                 *
+                 * 停手的代价只是这批留在 processing 下轮重放，event_id 的唯一索引
+                 * 会挡掉重复写入；继续往下走的代价是无声丢数据，两者不对等。
+                 */
+                if ($token !== null && !self::renewLock($redis, $token)) {
+                    $result['stopped'] = 'lock';
+                    $result['error'] = sprintf(
+                        '写库期间刷库锁已易主，本批 %d 条（已写入 %d 行）保留在 processing 中未确认，'
+                        . '下次刷库会重放，重复部分由 event_id 唯一索引挡下',
+                        count($items),
+                        $ok
+                    );
+                    break;
+                }
+                $renewAt = microtime(true) + self::LOCK_RENEW_INTERVAL;
+
+                /*
+                 * 走到这里数据库是通的、锁也还在手上，这一批可以确认掉了。
                  * 但确认的前提是「没写进去的那些留下了证据」：Redis List 只能整批 LTRIM，
                  * 做不到只确认成功的几条，所以先把失败的原样搬进死信队列再裁剪。
                  * 顺序不能反 —— 反了就是老问题：一批 1000 条只成功 1 条，另外 999 条无声消失。
+                 * pushDead() 写不进去会抛异常，异常会跳过下面的 LTRIM，这批原样留着。
                  */
-                $rejectedRows = array_fill_keys($outcome['failed'], true);
                 $rowOfItem = array_flip($rowItem);
                 $dead = [];
                 foreach ($items as $i => $item) {
@@ -607,17 +729,7 @@ LUA;
                 $result['dead'] += self::pushDead($redis, $dead);
 
                 # 确认：这批已经有归宿（进了数据库或死信），从 processing 清掉
-                $redis->lTrim(self::PROCESSING_KEY, count($items), -1);
-
-                # 只有真的写进去的行才会影响统计，被拒的不算
-                if ($ok > 0) {
-                    $written = empty($outcome['failed'])
-                        ? $rows
-                        : array_values(array_diff_key($rows, $rejectedRows));
-                    foreach (Cache::datesOf($written) as $date) {
-                        $dates[$date] = true;
-                    }
-                }
+                $redis->lTrim(self::processingKey(), count($items), -1);
 
                 $result['attempted'] += count($items);
                 $result['written']   += $ok;
@@ -634,7 +746,7 @@ LUA;
                 $result['stopped'] = 'limit';
             }
 
-            $redis->set(self::LAST_FLUSH_KEY, time());
+            $redis->set(self::lastFlushKey(), time());
         } catch (\Throwable $e) {
             // 刷库中断不影响调用方，未裁剪的数据仍在队列里
             $result['stopped'] = 'error';
@@ -661,7 +773,71 @@ LUA;
      */
     public static function isDataKey(string $key): bool
     {
-        return str_starts_with($key, self::KEY);
+        return str_starts_with($key, self::key());
+    }
+
+    /**
+     * 这个键是不是「加站点指纹之前」的队列数据键
+     *
+     * 卸载清理时要和 isDataKey() 一起看：老键里同样可能压着没落库的数据，
+     * 只认新键名的话，清理会把它们当普通缓存删掉。
+     *
+     * @param string $key 完整键名
+     * @return bool
+     */
+    public static function isLegacyDataKey(string $key): bool
+    {
+        return str_starts_with($key, self::LEGACY_PREFIX);
+    }
+
+    /**
+     * 把加指纹之前遗留的队列接管到当前站点的键名下
+     *
+     * 升级到带指纹的键名之后，老队列里没落库的访问日志会突然「没人消费」：
+     * 生产者写新键、消费者读新键，老键就那么放着，直到有人手动清 Redis。
+     * 所以升级后第一次保存设置（或跑一次 flush-queue）时把它们改名接过来。
+     *
+     * 只在「新键还不存在」时接管：新键已经有数据说明这个站点早就在用新键名了，
+     * 这时候合并两条队列的顺序没有意义，宁可原样留着让人工处理。
+     *
+     * 多个站点共用一个 Redis 且都还在用老键名时，谁先接管谁拿走整条队列 ——
+     * 这正是老键名本身的毛病，接管只是把它固定下来，不会让情况更糟。
+     *
+     * @param Redis $redis
+     * @return array{adopted:string[],skipped:string[]} 接管了哪些、因新键已存在而跳过哪些
+     */
+    public static function adoptLegacy(Redis $redis): array
+    {
+        $out = ['adopted' => [], 'skipped' => []];
+
+        $moves = [
+            self::LEGACY_PREFIX                       => self::key(),
+            self::LEGACY_PREFIX . ':processing'       => self::processingKey(),
+            self::LEGACY_PREFIX . ':dead'             => self::deadKey(),
+        ];
+
+        try {
+            foreach ($moves as $legacy => $current) {
+                # 理论上不会相等（新键必带指纹），相等就说明指纹没生效，别动
+                if ($legacy === $current || !$redis->exists($legacy)) {
+                    continue;
+                }
+                if ($redis->exists($current)) {
+                    $out['skipped'][] = $legacy;
+                    continue;
+                }
+                if ($redis->rename($legacy, $current)) {
+                    $out['adopted'][] = $legacy;
+                }
+            }
+
+            # 锁和刷库时间戳是状态不是数据，重新算就有，不值得接管
+            $redis->del(self::LEGACY_PREFIX . ':lock', self::LEGACY_PREFIX . ':last_flush');
+        } catch (\Throwable $e) {
+            // 接管失败不该挡住别的事；老键原样留着，下次还有机会
+        }
+
+        return $out;
     }
 
     /**
@@ -751,10 +927,13 @@ LUA;
      */
     private static function clampId(mixed $value): ?int
     {
-        if (!is_numeric($value)) {
+        if (is_int($value)) {
+            $id = $value;
+        } elseif (is_string($value) && preg_match('/^[0-9]+$/D', $value) === 1) {
+            $id = (int)$value;
+        } else {
             return null;
         }
-        $id = (int)$value;
         return ($id < 0 || $id > self::UNSIGNED_INT_MAX) ? null : $id;
     }
 }

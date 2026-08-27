@@ -43,6 +43,8 @@ final class Settings
         'redisPort' => '6379',
         'redisAuth' => '',
         'writeQueue' => '1',
+        # 队列归属变更时的行为闸门；'force' 只对一次保存生效，随后自动复位
+        'queueSwitch' => 'safe',
         'queueFlushSize' => '100',
         'queueFlushInterval' => '60',
         'dbType' => 'follow',

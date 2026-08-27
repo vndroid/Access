@@ -48,6 +48,19 @@ final class Migrate
      */
     private const DONE_OPTION = 'access_migrate_done';
 
+    /**
+     * 迁移过程中写不进目标库的源行 id
+     *
+     * 单独记一份，是因为「完成」这个判断不能只看扫没扫到头：
+     * 失败行在目标表里留下的是空洞，而续传点取的是目标表的 MAX(id)，
+     * 空洞会被自然跳过。不把它们记下来的话，扫完就是 done，
+     * 少掉的那几行再也没人知道。
+     */
+    private const FAILED_OPTION = 'access_migrate_failed';
+
+    /** 失败 id 最多记这么多个，够定位问题即可，不让这一行无限变长 */
+    private const MAX_FAILED_TRACKED = 500;
+
     /** 3.1.0 早期版本曾经把标记写在插件配置里，保留用于兼容与清理 */
     private const LEGACY_DONE_KEY = 'dbMigrateDone';
 
@@ -59,12 +72,13 @@ final class Migrate
      * @param float|null $deadline 时间预算（microtime 时间戳），为 null 表示不限时
      * @return array {
      *     status: MigrateStatus, moved: int 已迁移行数,
-     *     total: int 源表总行数, pending: int 剩余行数
+     *     total: int 源表总行数, pending: int 剩余行数,
+     *     failed: int 累计写不进目标库的行数（大于 0 时永远不会标记为完成）
      * }
      */
     public static function ensure(Db $target, array $dbSettings, ?float $deadline = null): array
     {
-        $result = ['status' => MigrateStatus::None, 'moved' => 0, 'total' => 0, 'pending' => 0];
+        $result = ['status' => MigrateStatus::None, 'moved' => 0, 'total' => 0, 'pending' => 0, 'failed' => 0];
 
         try {
             $main = Database::main();
@@ -106,11 +120,16 @@ final class Migrate
             return $result;
         }
 
-        $run = self::run($main, $target, ['deadline' => $deadline]);
+        $run = self::run($main, $target, ['deadline' => $deadline, 'fingerprint' => $fingerprint]);
         $result['moved'] = $run['moved'];
         $result['pending'] = max(0, $pending - $run['moved']);
+        $result['failed'] = count(self::failures($main, $fingerprint));
 
-        if ($run['done']) {
+        /*
+         * 有行没能迁过去就绝不能打完成标记：标记一旦写下，
+         * 以后每次都在 isMarked() 那里直接返回，谁也不会再回头看这张源表。
+         */
+        if ($run['done'] && $result['failed'] === 0) {
             self::mark($main, $fingerprint);
             $result['status'] = MigrateStatus::Done;
         } else {
@@ -154,8 +173,14 @@ final class Migrate
      *
      * @param Db $main 主库
      * @param Db $target 目标库
-     * @param array $options batchSize / deadline / progress(已迁移, 总数, 当前 id)
-     * @return array {moved: int, done: bool, lastId: int}
+     * @param array $options batchSize / deadline / progress(已迁移, 总数, 当前 id) /
+     *                        fingerprint（传入后会把失败行记进 options，供「能不能算完成」判断）
+     * @return array {
+     *     moved: int 实际写入行数, done: bool 是否已全部迁完（有失败行时恒为 false）,
+     *     lastId: int 本次推进到的源 id, failed: int 写不进去的行数,
+     *     failedIds: int[] 写不进去的源行 id,
+     *     error: ?string 整批写入失败（连不上目标库等）时的说明，此时断点不推进
+     * }
      */
     public static function run(Db $main, Db $target, array $options = []): array
     {
@@ -165,7 +190,7 @@ final class Migrate
 
         $maxSourceId = self::sourceMaxId($main);
         if ($maxSourceId <= 0) {
-            return ['moved' => 0, 'done' => true, 'lastId' => 0];
+            return ['moved' => 0, 'done' => true, 'lastId' => 0, 'failed' => 0, 'failedIds' => [], 'error' => null];
         }
 
         # 先抬高目标表的自增起点，给迁移数据留出主键区间
@@ -176,6 +201,7 @@ final class Migrate
         $lastId = self::resumeFrom($target, $maxSourceId);
         $moved = 0;
         $done = true;
+        $error = null;
 
         @set_time_limit(0);
 
@@ -185,6 +211,9 @@ final class Migrate
          * 按实际存在的列取数，缺 event_id 就整列略过（那部分数据本来也没有）。
          */
         $columns = self::usableColumns($main, $main->getPrefix() . 'access', self::COLUMNS);
+
+        $fingerprint = isset($options['fingerprint']) ? (string)$options['fingerprint'] : null;
+        $failedIds = [];
 
         while (true) {
             $rows = $main->fetchAll(
@@ -200,11 +229,67 @@ final class Migrate
                 break;
             }
 
-            $moved += self::insertBatch($target, $rows, $columns);
+            # insertBatchDetailed 的失败下标是按位置给的，这里显式对齐，别依赖驱动的返回形态
+            $rows = array_values($rows);
+
+            $outcome = self::insertBatchDetailed($target, $rows, $columns);
+
+            /*
+             * 失败行先原地重试一次：整批 INSERT 失败会退化成逐行写，
+             * 其中一部分是连接抖动、锁等待这类一次性问题，重试就过去了。
+             * 真正的脏数据重试也还是失败，接着往下走。
+             */
+            if (!empty($outcome['failed'])) {
+                $firstRound = $outcome['failed'];
+                $retry = [];
+                foreach ($firstRound as $i) {
+                    $retry[] = $rows[$i];
+                }
+
+                $second = self::insertBatchDetailed($target, $retry, $columns);
+                $outcome['written'] += $second['written'];
+
+                # $second 的下标是 $retry 的，换算回 $rows 的下标
+                $stillFailed = [];
+                foreach ($second['failed'] as $j) {
+                    $stillFailed[] = $firstRound[$j];
+                }
+                $outcome['failed'] = $stillFailed;
+            }
+
+            /*
+             * 一行都没写进去、又拿不到「哪几行有问题」—— 失败发生在语句之前：
+             * 连不上目标库，或者语句根本拼不出来。
+             *
+             * 这种情况既不能推进断点也不能继续扫。以前照样往下走，
+             * 于是整张表被「扫完」了却一行都没搬过去，最后还返回 done=true，
+             * 迁移完成标记一写，源表从此没人再看一眼。
+             */
+            if ($outcome['written'] === 0 && empty($outcome['failed'])) {
+                $done = false;
+                $error = '目标库写入失败（连接不可用，或语句无法构造），断点未推进，请检查后重新执行';
+                break;
+            }
+
+            $moved += $outcome['written'];
             $lastId = (int)$rows[count($rows) - 1]['id'];
 
             if ($progress !== null) {
                 $progress($already + $moved, $total, $lastId);
+            }
+
+            /*
+             * 有行确实写不进去就停手，不再往下扫。
+             * 以前这里只推进 checkpoint 继续跑：失败行落在新 checkpoint 之前，
+             * 从此没人再看它一眼，而扫到头之后照样返回 done=true ——
+             * 迁移「完成」了，数据少了一截，还没有任何痕迹。
+             */
+            if (!empty($outcome['failed'])) {
+                foreach ($outcome['failed'] as $i) {
+                    $failedIds[] = (int)$rows[$i]['id'];
+                }
+                $done = false;
+                break;
             }
 
             if ($deadline !== null && microtime(true) >= $deadline) {
@@ -213,12 +298,27 @@ final class Migrate
             }
         }
 
-        return ['moved' => $moved, 'done' => $done, 'lastId' => $lastId];
+        if (!empty($failedIds) && $fingerprint !== null) {
+            self::recordFailures($main, $fingerprint, $failedIds);
+        }
+
+        return [
+            'moved'     => $moved,
+            'done'      => $done && empty($failedIds),
+            'lastId'    => $lastId,
+            'failed'    => count($failedIds),
+            'failedIds' => $failedIds,
+            'error'     => $error,
+        ];
     }
 
     /**
      * 批量写入一批数据，整批失败时退化为逐行写入，避免单条脏数据毁掉整批
-     * 迁移和写入队列共用这一段
+     *
+     * @deprecated 请改用 insertBatchDetailed()。
+     *   这个包装只返回写入行数，把「哪几行没写进去」丢掉了 —— 调用方于是只能
+     *   在「整批重试」和「当作成功继续」之间二选一，历史上迁移正是因此
+     *   把失败行永久跳了过去。新代码一律走 insertBatchDetailed()。
      *
      * @param Db $target
      * @param array $rows
@@ -556,7 +656,117 @@ final class Migrate
             $main->query($main->delete('table.options')->where('name = ?', self::DONE_OPTION));
         } catch (\Throwable $e) {
         }
+        # 完成标记和失败记录是同一件事的两面，清一个就得清另一个
+        self::clearFailures($main);
         self::cleanupLegacyMarker($main);
+    }
+
+    /**
+     * 读出某个目标库遗留的迁移失败行
+     *
+     * @param Db $main
+     * @param string $fingerprint
+     * @return int[] 源表行 id，从未失败过时是空数组
+     */
+    public static function failures(Db $main, string $fingerprint): array
+    {
+        $all = self::readFailed($main);
+        $ids = $all[$fingerprint] ?? [];
+        return is_array($ids) ? array_map('intval', $ids) : [];
+    }
+
+    /**
+     * 记下写不进目标库的源行 id
+     *
+     * 累加而不是覆盖：一次迁移可能分很多轮跑完，每轮各自留下一些。
+     *
+     * @param Db $main
+     * @param string $fingerprint
+     * @param int[] $ids
+     * @return void
+     */
+    public static function recordFailures(Db $main, string $fingerprint, array $ids): void
+    {
+        if (empty($ids)) {
+            return;
+        }
+
+        $all = self::readFailed($main);
+        $merged = array_values(array_unique(array_merge($all[$fingerprint] ?? [], array_map('intval', $ids))));
+        sort($merged);
+
+        # 只留前面这些，够定位问题就行，不让这一行无限变长
+        $all[$fingerprint] = array_slice($merged, 0, self::MAX_FAILED_TRACKED);
+
+        self::writeFailed($main, $all);
+    }
+
+    /**
+     * 忘掉某个目标库的失败记录（重新开始迁移、或人工修完之后调用）
+     *
+     * @param Db $main
+     * @param string|null $fingerprint 为 null 时清空整行
+     * @return void
+     */
+    public static function clearFailures(Db $main, ?string $fingerprint = null): void
+    {
+        try {
+            if ($fingerprint === null) {
+                $main->query($main->delete('table.options')->where('name = ?', self::FAILED_OPTION));
+                return;
+            }
+            $all = self::readFailed($main);
+            unset($all[$fingerprint]);
+            self::writeFailed($main, $all);
+        } catch (\Throwable $e) {
+        }
+    }
+
+    /**
+     * @param Db $main
+     * @return array<string, int[]>
+     */
+    private static function readFailed(Db $main): array
+    {
+        try {
+            $row = $main->fetchRow(
+                $main->select()->from('table.options')->where('name = ?', self::FAILED_OPTION)
+            );
+            if (empty($row['value'])) {
+                return [];
+            }
+            $decoded = json_decode((string)$row['value'], true);
+            return is_array($decoded) ? $decoded : [];
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
+    /**
+     * @param Db $main
+     * @param array<string, int[]> $all
+     * @return void
+     */
+    private static function writeFailed(Db $main, array $all): void
+    {
+        try {
+            $all = array_filter($all, static fn($ids): bool => !empty($ids));
+            $value = json_encode($all);
+
+            $exists = $main->fetchRow(
+                $main->select()->from('table.options')->where('name = ?', self::FAILED_OPTION)
+            );
+
+            if (empty($exists)) {
+                $main->query($main->insert('table.options')
+                    ->rows(['name' => self::FAILED_OPTION, 'user' => 0, 'value' => $value]));
+            } else {
+                $main->query($main->update('table.options')
+                    ->rows(['value' => $value])
+                    ->where('name = ?', self::FAILED_OPTION));
+            }
+        } catch (\Throwable $e) {
+        }
     }
 
     /**

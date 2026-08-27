@@ -317,4 +317,98 @@ final class Database
             return false;
         }
     }
+
+    /**
+     * 某一列上是否存在「单列唯一索引」
+     *
+     * 按索引名去找是不够的：新建表时索引名来自 sql/*.sql（MySQL 里叫 uk_event_id），
+     * 存量表升级时的索引名却是 Schema 自己拼的 {表名}_event_id，两条路各叫各的。
+     * 真正要确认的从来不是名字，而是「这一列上有没有唯一约束」——
+     * 没有它，队列重放就会把同一条访问日志重复计入统计。
+     *
+     * 只认单列唯一索引：复合唯一索引 (event_id, x) 不能保证 event_id 本身唯一。
+     *
+     * @param Db $db
+     * @param string $table 完整表名（含前缀）
+     * @param string $column
+     * @return bool 探测本身失败时返回 false（宁可误报缺失去重建，也不能漏报）
+     */
+    public static function uniqueIndexOn(Db $db, string $table, string $column): bool
+    {
+        try {
+            $driver = self::driver($db);
+
+            if ($driver === Driver::Sqlite) {
+                # SQLite 要两级 PRAGMA：先列出索引，再逐个看它盖住哪些列
+                $indexes = $db->fetchAll($db->query("PRAGMA index_list(`{$table}`)", Db::READ));
+                foreach ($indexes as $index) {
+                    if (empty($index['unique']) || empty($index['name'])) {
+                        continue;
+                    }
+                    $columns = $db->fetchAll(
+                        $db->query("PRAGMA index_info(`{$index['name']}`)", Db::READ)
+                    );
+                    if (count($columns) === 1
+                        && isset($columns[0]['name'])
+                        && strcasecmp((string)$columns[0]['name'], $column) === 0
+                    ) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            if ($driver === Driver::Mysql) {
+                # Non_unique=0 即唯一索引；Seq_in_index=1 排除掉「这一列只是复合索引的第二段」
+                $rows = $db->fetchAll($db->query(
+                    "SHOW INDEX FROM `{$table}` WHERE Non_unique = 0 AND Seq_in_index = 1",
+                    Db::READ
+                ));
+                $names = [];
+                foreach ($rows as $row) {
+                    if (isset($row['Column_name'], $row['Key_name'])
+                        && strcasecmp((string)$row['Column_name'], $column) === 0
+                    ) {
+                        $names[(string)$row['Key_name']] = true;
+                    }
+                }
+                if (empty($names)) {
+                    return false;
+                }
+                # 再确认这些索引确实只有一列
+                $all = $db->fetchAll($db->query("SHOW INDEX FROM `{$table}`", Db::READ));
+                $width = [];
+                foreach ($all as $row) {
+                    $key = (string)($row['Key_name'] ?? '');
+                    $width[$key] = ($width[$key] ?? 0) + 1;
+                }
+                foreach (array_keys($names) as $name) {
+                    if (($width[$name] ?? 0) === 1) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            /*
+             * PostgreSQL：indisunique 是唯一性，indnatts = 1 限定单列，
+             * indkey[0] 指向被索引的那一列。索引名不参与判断。
+             */
+            $sql = "SELECT i.relname
+                      FROM pg_index x
+                      JOIN pg_class i ON i.oid = x.indexrelid
+                      JOIN pg_class t ON t.oid = x.indrelid
+                      JOIN pg_namespace n ON n.oid = t.relnamespace
+                      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = x.indkey[0]
+                     WHERE t.relname = '{$table}'
+                       AND n.nspname = ANY (current_schemas(false))
+                       AND x.indisunique
+                       AND x.indnatts = 1
+                       AND a.attname = '{$column}'";
+
+            return !empty($db->fetchRow($db->query($sql, Db::READ)));
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
 }

@@ -341,9 +341,15 @@ final class Health
     /**
      * 站点指纹，用插件目录路径生成
      *
-     * @return string
+     * 同一台机器上的多个 Typecho 各有各的插件目录，这个值就能把它们分开。
+     * Redis 键名也用它（见 Cache::prefix()）：路径是少数几个「在 Web 请求、
+     * 命令行脚本、cron 里都能一模一样地算出来」的东西 —— 换成站点地址或
+     * 数据库配置的话，命令行下取不到 Options，算出来的指纹会和前台对不上，
+     * 那就成了两条各刷各的队列。
+     *
+     * @return string 12 位十六进制
      */
-    private static function fingerprint(): string
+    public static function fingerprint(): string
     {
         return substr(md5(__DIR__), 0, 12);
     }

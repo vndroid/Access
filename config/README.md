@@ -38,6 +38,7 @@ access:
   redisPort: 6379
   redisAuth: ""                   # 留空表示无密码
   writeQueue: 1                   # 1 自动（配了 Redis 才生效），0 禁用
+  queueSwitch: "safe"             # 队列还有积压时改 Redis/统计库：safe 拒绝保存，force 强行切换一次
   queueFlushSize: 500             # 队列积压到这个条数就入库一次
   queueFlushInterval: 60          # 距上次入库超过这么多秒也入库一次
 
@@ -69,6 +70,7 @@ access:
 | `redisPort` | `6379` | Redis 端口 |
 | `redisAuth` | 空 | Redis 密码 |
 | `writeQueue` | `1` | 写入队列，`1` 自动（需先配 Redis），`0` 禁用 |
+| `queueSwitch` | `safe` | 队列尚有积压时改动 Redis/写入队列/统计库的行为：`safe` 拒绝保存，`force` 强行切换一次（保存后自动复位为 `safe`） |
 | `queueFlushSize` | `500` | 队列积压达到该条数触发入库 |
 | `queueFlushInterval` | `60` | 距上次入库超过该秒数触发入库 |
 | `dbType` | `follow` | 统计数据库类型：`follow` 跟随 Typecho、`mysql`、`pgsql` |

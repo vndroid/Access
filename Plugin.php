@@ -28,7 +28,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.2.0
+ * @version 3.2.1
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
@@ -52,6 +52,29 @@ class Plugin implements PluginInterface
         }
         if (!extension_loaded('intl')) {
             throw new PluginException(_t('检测到当前 PHP 环境缺失 intl 扩展'));
+        }
+        /*
+         * mbstring：Queue::normalize() 按字符数截断各列（varchar(N) 数的是字符不是字节），
+         * 用的是 mb_strlen()/mb_substr()。缺了它，每一条访问日志的入队都会致命错误。
+         */
+        if (!extension_loaded('mbstring')) {
+            throw new PluginException(_t('检测到当前 PHP 环境缺失 mbstring 扩展'));
+        }
+        /*
+         * GMP：IPv6 地址要在 128 位整数和点分表示之间来回换算，超出 PHP 原生整型范围，
+         * Core 里走的是 gmp_init()/gmp_strval()。只在 IPv6 访客到来时才用到，
+         * 所以缺了它平时看不出问题 —— 正因如此更该在启用时就拦下来。
+         */
+        if (!extension_loaded('gmp')) {
+            throw new PluginException(_t('检测到当前 PHP 环境缺失 GMP 扩展（IPv6 地址解析需要）'));
+        }
+        /*
+         * event_id 的前 16 位十六进制是「毫秒时间戳左移 16 位」，
+         * 32 位 PHP 上这个移位会溢出，生成的标识失去按毫秒聚簇的前缀，唯一索引的写入
+         * 会退化成全表随机页写入。要求 64 位不是洁癖，是这个设计的前提。
+         */
+        if (PHP_INT_SIZE < 8) {
+            throw new PluginException(_t('本插件需要 64 位 PHP 环境（写入队列的事件标识依赖 64 位整数）'));
         }
         # 有 config/current.yaml 就以它为准。注意这里只读文件，
         # 把设置数组直接交给 install()——Options 组件在一次请求里只读一遍插件配置，
@@ -192,21 +215,35 @@ class Plugin implements PluginInterface
                 (string)($config->redisAuth ?? '')
             );
 
-            // 使用 SCAN 迭代删除所有匹配前缀的键，避免 KEYS 阻塞
-            $prefix = Cache::PREFIX . '*';
+            /*
+             * 使用 SCAN 迭代删除所有匹配前缀的键，避免 KEYS 阻塞。
+             *
+             * 扫的是 typecho_access:*（含别的站点），但只删两类：
+             * 本站点指纹下的键，以及加指纹之前留下的老键。
+             * 同一个 Redis 上别的站点的键必须原样放过 —— 以前键名不带指纹，
+             * 这里的「一把梭删掉」就是在删别人的队列。
+             */
+            $prefix = Cache::BASE . '*';
+            $mine = Cache::prefix();
             $iterator = null;
             while (($keys = $redis->scan($iterator, $prefix, 100)) !== false) {
+                $keys = array_values(array_filter($keys, static function ($key) use ($mine) {
+                    $key = (string)$key;
+                    return str_starts_with($key, $mine) || Cache::isLegacyKey($key);
+                }));
+
                 if ($keepQueue) {
                     /*
-                     * typecho_access:queue、:queue:dead、:queue:lock、:queue:last_flush
-                     * 装的是还没落库的数据和它的处理状态，不是缓存。
-                     * 缓存删了会重算，这些删了就没了。
+                     * 队列、死信、锁、刷库时间戳装的是还没落库的数据和它的处理状态，
+                     * 不是缓存。缓存删了会重算，这些删了就没了。
                      */
                     $keys = array_values(array_filter(
                         $keys,
                         static fn($key) => !Queue::isDataKey((string)$key)
+                            && !Queue::isLegacyDataKey((string)$key)
                     ));
                 }
+
                 if (!empty($keys)) {
                     $redis->del($keys);
                 }
@@ -329,6 +366,16 @@ class Plugin implements PluginInterface
             . '可以显著降低突发流量下的数据库连接数与写入压力，'
             . '未配置 Redis 时本项自动禁用，写入行为与之前一致。'
         );
+        $queueSwitch = new Radio(
+            'queueSwitch', [
+                'safe'  => '安全',
+                'force' => '强制切换一次',
+            ], 'safe', '队列归属变更',
+            '改动 Redis 地址、写入缓冲开关或统计数据库，都会让已经攒在旧队列里的消息失去归属。'
+            . '「安全」会先用旧配置把队列刷干净，刷不干净就拒绝保存，'
+            . '避免旧数据写错库或永远留在旧 Redis 里。'
+            . '确实要丢下这些消息时选「强制切换一次」，本次保存生效后自动复位为「安全」。'
+        );
         $queueFlushSize = new Text(
             'queueFlushSize', null, '100',
             '队列刷新条数', '队列积压达到该条数时触发一次入库，默认为 100 条'
@@ -386,6 +433,7 @@ class Plugin implements PluginInterface
         $form->addInput($redisPort->addRule('isInteger', _t('端口必须为纯数字')));
         $form->addInput($redisAuth);
         $form->addInput($writeQueue);
+        $form->addInput($queueSwitch);
         $form->addInput($queueFlushSize->addRule('isInteger', _t('刷新条数必须为纯数字')));
         $form->addInput($queueFlushInterval->addRule('isInteger', _t('刷新间隔必须为纯数字')));
         $form->addInput($dbType);
@@ -457,12 +505,41 @@ class Plugin implements PluginInterface
         }
 
         /*
+         * 接管必须排在 drain 前面。
+         *
+         * 升级到带站点指纹的键名之后，第一次保存设置时老队列还压在旧键名上：
+         * 这时 drain 看的是新键名（空的），会得出「干净」的结论放行保存，
+         * 而接管一旦发生在保存之后，那批本属于旧库的消息就被刷进新库了。
+         * 接管用的是「旧配置」的 Redis —— 老队列在那儿，不在新配的 Redis 上。
+         */
+        $adoptNote = '';
+        try {
+            $adoptNote = self::adoptLegacyQueue(Options::alloc()->plugin('Access'));
+        } catch (\Throwable $e) {
+            // 读不到旧配置说明还没配过，也就没有老队列
+        }
+
+        /*
          * 新配置会换掉队列的归属时，先用「旧配置」把积压刷干净。
          * 保存之后再刷来不及：改了 Redis 地址就连不上老队列，
          * 改了统计数据库则会把老消息写进新库 —— 两种都是无声的数据错位。
          * 必须赶在 configPlugin() 之前，Core 读的是当下生效的那份配置。
          */
-        $drainNote = self::drainBeforeSwitch($settings);
+        $drain = self::drainBeforeSwitch($settings);
+        if ($drain['blocked']) {
+            # 保存被拦下，配置原样不动 —— 旧队列还有主人，不能在这时候换掉它
+            self::goBack($drain['note'], 'error');
+        }
+
+        /*
+         * 「强制切换」只对本次保存生效：留着不复位的话，这道闸门就被永久关掉了，
+         * 而它恰恰是那种「平时不该起作用、起作用时很关键」的保护。
+         */
+        if (($settings['queueSwitch'] ?? 'safe') === 'force') {
+            $settings['queueSwitch'] = 'safe';
+        }
+
+        $drainNote = $adoptNote . $drain['note'];
 
         Edit::configPlugin('Access', $settings);
 
@@ -494,6 +571,11 @@ class Plugin implements PluginInterface
             );
         }
 
+        if (!empty($schema['repaired'])) {
+            # 版本号本来就是最新的，但实地校验发现结构缺了东西并补上了 —— 值得说一声
+            return _t('（数据表结构校验补齐了：%s）', implode('、', $schema['repaired']));
+        }
+
         return empty($schema['applied'])
             ? ''
             : _t('（数据表结构已由 %s 升级至 %s）', $schema['from'] ?? '3.1.x', $schema['to']);
@@ -502,39 +584,101 @@ class Plugin implements PluginInterface
     /**
      * 配置切换前先把旧队列刷干净
      *
+     * 刷不干净时返回 blocked=true，调用方必须放弃保存。
+     * 以前这里只返回一句提示、配置照样保存，等于把「队列还有主人」这件事
+     * 降级成了一条用户多半不会读的黄字。
+     *
      * @param array $settings 即将保存的新配置
-     * @return string 要追加给用户的提示，无事发生时为空串
+     * @return array{blocked:bool,note:string} note 为要展示给用户的说明，无事发生时为空串
      */
-    private static function drainBeforeSwitch(array $settings): string
+    private static function drainBeforeSwitch(array $settings): array
     {
+        $pass = ['blocked' => false, 'note' => ''];
+
         try {
             $old = Options::alloc()->plugin('Access');
         } catch (\Throwable $e) {
-            return '';
+            # 读不到旧配置说明插件还没配过，也就没有旧队列
+            return $pass;
         }
 
         # 归属没变的话，老消息在新配置下照样会被消费，不用动它
         if (self::queueHome($old) === self::queueHome($settings)) {
-            return '';
+            return $pass;
         }
 
         try {
             $drain = (new Core())->drainQueue();
         } catch (\Throwable $e) {
-            return _t('旧队列状态未能确认。');
+            # 连队列状态都确认不了，更不能当成「干净」放行
+            $drain = [
+                'clean' => false, 'written' => 0, 'pending' => null,
+                'dead' => 0, 'error' => $e->getMessage(),
+            ];
         }
 
         if ($drain['clean']) {
-            return $drain['written'] > 0
-                ? _t('切换前已刷入积压 %s 条。', number_format($drain['written']))
-                : '';
+            return [
+                'blocked' => false,
+                'note' => $drain['written'] > 0
+                    ? _t('切换前已刷入积压 %s 条。', number_format($drain['written']))
+                    : '',
+            ];
         }
 
         $left = $drain['pending'] === null
             ? _t('若干')
             : number_format((int)$drain['pending'] + (int)$drain['dead']);
 
-        return _t('注意：旧 Redis 中还有 %s 条未落库，新配置不会再处理。', $left);
+        /*
+         * 后果分两种，提示不能混为一谈：
+         * Redis 目标变了 —— 旧队列留在旧 Redis 里，新配置根本连不上，等同于丢弃；
+         * Redis 没变，只换了统计库或关了写入缓冲 —— 同一个队列会被继续消费，
+         *   但落进新库，这批本该属于旧库的数据就此错位。
+         *   原来那句「新配置不会再处理」在这种场景下是反的。
+         */
+        $consequence = self::redisHome($old) === self::redisHome($settings)
+            ? _t('这些消息仍在同一个 Redis 里，保存后会被继续消费，但会写进新的统计数据库，造成数据错位。')
+            : _t('这些消息会留在原来的 Redis 中，新配置连不上它们，等同于丢弃。');
+
+        $why = empty($drain['error']) ? '' : _t('（%s）', $drain['error']);
+
+        if (($settings['queueSwitch'] ?? 'safe') === 'force') {
+            return [
+                'blocked' => false,
+                'note' => _t('注意：已按「强制切换一次」保存，旧队列中还有 %s 条未落库。%s', $left, $consequence),
+            ];
+        }
+
+        return [
+            'blocked' => true,
+            'note' => _t(
+                '配置未保存：旧队列中还有 %s 条未落库。%s%s '
+                . '请先执行 tools/flush-queue.php 把队列刷干净后重试；'
+                . '确实要丢下这些消息时，把「队列归属变更」改为「强制切换一次」再保存。',
+                $left,
+                $consequence,
+                $why
+            ),
+        ];
+    }
+
+    /**
+     * Redis 目标指纹：只看「连的是哪个 Redis」，不含统计库
+     *
+     * queueHome() 用来判断「要不要刷」，这个用来判断「刷不干净会怎样」——
+     * Redis 没变的话旧消息还够得着，只是会写错库；变了就是彻底够不着。
+     *
+     * @param array|\Typecho\Config|null $config
+     * @return string
+     */
+    private static function redisHome($config): string
+    {
+        $target = Health::redisTarget($config);
+
+        return $target === null
+            ? 'redis-off'
+            : $target['host'] . ':' . $target['port'] . ':' . $target['auth'];
     }
 
     /**
@@ -548,8 +692,6 @@ class Plugin implements PluginInterface
      */
     private static function queueHome($config): string
     {
-        $target = Health::redisTarget($config);
-
         $writeQueue = '';
         if (is_array($config) || $config instanceof \ArrayAccess) {
             $writeQueue = (string)($config['writeQueue'] ?? '');
@@ -558,9 +700,7 @@ class Plugin implements PluginInterface
         }
 
         return md5(implode('|', [
-            $target === null
-                ? 'redis-off'
-                : $target['host'] . ':' . $target['port'] . ':' . $target['auth'],
+            self::redisHome($config),
             $writeQueue === '0' ? 'queue-off' : 'queue-on',
             Migrate::fingerprint(Database::settings($config)),
         ]));
@@ -621,7 +761,7 @@ class Plugin implements PluginInterface
 
         $error = Health::probeRedis($config);
         if ($error === null) {
-            return '';
+            return self::adoptLegacyQueue($config);
         }
 
         return _t(
@@ -629,6 +769,45 @@ class Plugin implements PluginInterface
             . '恢复后无需改动，插件会自动重新连接。）',
             $error
         );
+    }
+
+    /**
+     * 把加站点指纹之前遗留的队列接管过来
+     *
+     * 键名带上站点指纹之后，老键上的队列会突然没人消费 —— 生产者写新键、
+     * 消费者读新键，老键里没落库的访问日志就一直搁在那儿。
+     * 保存设置是升级后必经的一步（表结构升级也在这里做），顺手接管掉。
+     *
+     * @param mixed $config 插件配置
+     * @return string 要附加给用户的提示，无事发生时为空串
+     */
+    private static function adoptLegacyQueue($config): string
+    {
+        try {
+            $target = Health::redisTarget($config);
+            if ($target === null) {
+                return '';
+            }
+
+            $redis = Health::connect($target['host'], $target['port'], $target['auth']);
+            $moved = Queue::adoptLegacy($redis);
+            $redis->close();
+        } catch (\Throwable $e) {
+            return '';
+        }
+
+        $note = '';
+        if (!empty($moved['adopted'])) {
+            $note .= _t('（已接管升级前遗留的队列：%s）', implode('、', $moved['adopted']));
+        }
+        if (!empty($moved['skipped'])) {
+            $note .= _t(
+                '（注意：%s 里还有升级前遗留的数据，但当前站点的队列已在使用中，未做合并，请人工处理）',
+                implode('、', $moved['skipped'])
+            );
+        }
+
+        return $note;
     }
 
     /**

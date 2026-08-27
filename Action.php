@@ -227,21 +227,29 @@ class Action extends Widget implements ActionInterface
             } else {
                 $main = Database::main();
                 $target = Database::get($dbSettings);
+                $fingerprint = Migrate::fingerprint($dbSettings);
                 $status = Migrate::status($main, $target, $dbSettings);
                 $moved = 0;
+                $runError = null;
 
                 if (!$status['marked'] && $status['pending'] > 0 && !$this->request->get('probe')) {
                     $seconds = (int)$this->request->get('seconds', 3);
                     $seconds = max(1, min($seconds, 10));
 
-                    $run = Migrate::run($main, $target, ['deadline' => microtime(true) + $seconds]);
+                    $run = Migrate::run($main, $target, [
+                        'deadline'    => microtime(true) + $seconds,
+                        'fingerprint' => $fingerprint,
+                    ]);
                     $moved = $run['moved'];
+                    $runError = $run['error'];
                     $status = Migrate::status($main, $target, $dbSettings);
                 }
 
-                $done = $status['marked'] || $status['pending'] === 0;
+                # 有行迁不过去就不算完成：pending 是按行数算的，它永远到不了 0
+                $stuck = Migrate::failures($main, $fingerprint);
+                $done = $status['marked'] || ($status['pending'] === 0 && empty($stuck));
                 if ($done) {
-                    Migrate::mark($main, Migrate::fingerprint($dbSettings));
+                    Migrate::mark($main, $fingerprint);
                 }
 
                 $data = [
@@ -251,6 +259,14 @@ class Action extends Widget implements ActionInterface
                     'migrated' => $done ? $status['total'] : $status['migrated'],
                     'pending' => $status['pending'],
                     'moved' => $moved,
+                    'failed' => count($stuck),
+                    /*
+                     * 这一轮一条都没推进，而且原因是「有行写不进去」或「整批写入失败」——
+                     * 再请求多少次也是原地打转。前端要靠这个标志收工，
+                     * 否则进度条会卡在同一个百分比上无限轮询。
+                     */
+                    'blocked' => !$done && $moved === 0 && (!empty($stuck) || $runError !== null),
+                    'reason' => $runError,
                 ];
             }
 

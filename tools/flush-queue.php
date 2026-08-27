@@ -20,8 +20,12 @@
  *
  * 退出码：
  *   0  正常（含「队列为空」「已有其它进程在刷」「达到本次上限，剩余部分下次继续」）
- *   1  有需要人过问的问题：Redis/数据库不可用、刷库中途出错、锁易主，
- *      或有消息没能写进数据库而转入了死信队列（--lenient 可豁免最后一项）
+ *   1  有需要人过问的问题：Redis/数据库不可用、刷库中途出错、锁易主、
+ *      刷完后读不到队列长度，或有消息没能写进数据库而转入了死信队列
+ *      （--lenient 可豁免死信这一项）
+ *
+ * 说明：写入队列在插件设置里被禁用之后，本脚本仍会把已有的存量刷完 ——
+ * 关掉开关只影响新消息入队，不代表之前攒下的可以不管。
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -100,10 +104,6 @@ try {
         say('插件未启用 Redis，写入队列未生效，无需刷库。');
         exit(0);
     }
-    if (($settings['writeQueue'] ?? '1') == '0') {
-        say('写入队列已在插件设置中禁用，无需刷库。');
-        exit(0);
-    }
 
     # 和前台走同一个工厂，超时才不会漏设 —— 这里以前只有连接超时、没有读超时，
     # Redis 连上了却不回话时，cron 任务会一直挂着
@@ -120,6 +120,19 @@ try {
         exit(1);
     }
 
+    /*
+     * 键名带上站点指纹之前遗留的队列，在这里顺手接管过来。
+     * cron 每分钟都会跑到这儿，比等管理员去后台保存一次设置更靠得住。
+     */
+    $adopted = Queue::adoptLegacy($redis);
+    if (!empty($adopted['adopted'])) {
+        say('已接管升级前遗留的队列：' . implode('、', $adopted['adopted']));
+    }
+    if (!empty($adopted['skipped'])) {
+        fwrite(STDERR, '注意：' . implode('、', $adopted['skipped'])
+            . " 里还有升级前遗留的数据，但当前站点的队列已在使用，未做合并，请人工处理。\n");
+    }
+
     # 这里必须用 tryLength()：length() 会把 Redis 故障伪装成 0，
     # 于是「Redis 挂了」被打印成「队列为空」，再以退出码 0 收场，故障就此石沉大海
     $pending = Queue::tryLength($redis);
@@ -127,9 +140,33 @@ try {
         fwrite(STDERR, "无法读取队列长度，Redis 可能已不可用。\n");
         exit(1);
     }
+    /*
+     * 写入队列被关掉了，不代表之前攒的消息不存在。
+     * 以前这里直接以 0 退出，旧积压就永远没人再看一眼，cron 也毫无提示。
+     * 关掉之后仍要负责把存量刷完，刷完了才安静退出。
+     */
+    $queueOff = ($settings['writeQueue'] ?? '1') == '0';
+    $deadOnly = Queue::deadLength($redis);
+
     if ($pending === 0) {
+        if ($deadOnly > 0) {
+            # 死信是「没能写进数据库的数据」，不是正常状态，不能装作队列干净
+            fwrite(STDERR, sprintf(
+                "队列已空，但死信队列中仍有 %s 条未能写入数据库，请检查后处理。\n",
+                number_format($deadOnly)
+            ));
+            $redis->close();
+            exit(empty($argvOptions['lenient']) ? 1 : 0);
+        }
         say('队列为空，无需刷库。');
         exit(0);
+    }
+
+    if ($queueOff) {
+        say(sprintf(
+            '写入队列已在插件设置中禁用，但仍有 %s 条存量待落库，本次继续刷完。',
+            number_format($pending)
+        ));
     }
 
     $token = Queue::acquireLock($redis);
@@ -150,13 +187,14 @@ try {
         Queue::releaseLock($redis, $token);
     }
 
-    $remaining = Queue::tryLength($redis) ?? 0;
+    # 读不到长度是 Redis 出问题了，不能和「剩余 0 条」显示成同一句话
+    $remaining = Queue::tryLength($redis);
     printf(
-        "已处理 %s 条（写入 %s 条），耗时 %.2f 秒，队列剩余 %s 条。\n",
+        "已处理 %s 条（写入 %s 条），耗时 %.2f 秒，队列剩余 %s。\n",
         number_format($result['attempted']),
         number_format($result['written']),
         microtime(true) - $startedAt,
-        number_format($remaining)
+        $remaining === null ? '未知（读取队列长度失败）' : number_format($remaining) . ' 条'
     );
 
     # attempted 与 written 的差额都没进数据库，必须说清楚去向
@@ -175,7 +213,7 @@ try {
      * 在标准输出上长得差不多；只看有没有抛异常的话，一次彻底失败的刷库同样以 0 退出，
      * cron 和监控完全看不出来。
      */
-    $failed = in_array($result['stopped'], ['db', 'lock', 'error'], true);
+    $failed = in_array($result['stopped'], ['db', 'lock', 'error'], true) || $remaining === null;
 
     # processing 长期不为 0 说明每轮刷库都没能确认，值得单独点出来
     $stuck = Queue::processingLength($redis);

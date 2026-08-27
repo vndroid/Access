@@ -670,6 +670,18 @@ include 'table-js.php';
                     $('#access-migrate-start').hide();
                     return;
                 }
+                /* 有行写不进目标库、这一轮又没推进任何进度：再请求下去只是原地打转 */
+                if (res.data.blocked) {
+                    migrateFinish(
+                        res.data.reason
+                            ? '迁移已停下：' + res.data.reason + '。'
+                            : '有 ' + formatNumber(res.data.failed || 0) + ' 行写不进统计数据库，迁移已停下。'
+                              + '常见原因是这几行数据超出目标表的列宽或类型限制。'
+                              + '请检查目标表结构后重试，或改用命令行脚本查看详细报错。',
+                        'error'
+                    );
+                    return;
+                }
                 migrateStep();
             },
             error: function(xhr) {

@@ -37,7 +37,6 @@ class Core
     protected bool $flushScheduled = false;
 
     /** Redis 缓存键前缀 */
-    private const CACHE_PREFIX = Cache::PREFIX;
 
     /** 历史日期的统计不会再变化，缓存 40 天足够覆盖当月图表 */
     private const PAST_DAY_TTL = 3456000;
@@ -650,7 +649,7 @@ class Core
         }
 
         try {
-            $data = $this->redis->get(self::CACHE_PREFIX . $key);
+            $data = $this->redis->get(Cache::key($key));
             if ($data === false) {
                 return null;
             }
@@ -680,7 +679,7 @@ class Core
         try {
             $ttl = $ttl ?? (86400 - (time() - strtotime(date("Y-m-d 00:00:00"))));
             $this->redis->setex(
-                self::CACHE_PREFIX . $key,
+                Cache::key($key),
                 max($ttl, 1),
                 json_encode($data, JSON_UNESCAPED_UNICODE)
             );

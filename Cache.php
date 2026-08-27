@@ -16,11 +16,36 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  */
 final class Cache
 {
-    /** 所有缓存键的公共前缀 */
-    public const PREFIX = 'typecho_access:';
+    /**
+     * 本插件所有 Redis 键的公共开头
+     *
+     * 只用来识别「这是 Access 写的键」，实际键名一律走 prefix()。
+     */
+    public const BASE = 'typecho_access:';
 
     /** post_pie 的 Top N 取自 pageSize，被夹在 1..50 之间 */
     private const POST_PIE_MAX = 50;
+
+    /** 站点指纹算一次就够，一次请求里会用上几十遍 */
+    private static ?string $prefix = null;
+
+    /**
+     * 键名前缀，带站点指纹
+     *
+     * 以前是写死的 typecho_access:，于是多个站点共用一个 Redis DB 时，
+     * 队列、死信、刷库锁、统计缓存全都撞在一起 —— A 站的访问日志被 B 站
+     * 消费掉写进 B 站的库，两边的刷库锁互相顶掉，缓存串着看。
+     * 指纹取自插件目录（见 Health::fingerprint()）。
+     *
+     * @return string
+     */
+    public static function prefix(): string
+    {
+        if (self::$prefix === null) {
+            self::$prefix = self::BASE . Health::fingerprint() . ':';
+        }
+        return self::$prefix;
+    }
 
     /**
      * 补上前缀
@@ -30,7 +55,31 @@ final class Cache
      */
     public static function key(string $name): string
     {
-        return self::PREFIX . $name;
+        return self::prefix() . $name;
+    }
+
+    /**
+     * 这个键是不是「加指纹之前」留下的老键
+     *
+     * 老键长 typecho_access:overview:total 这样，新键中间多一段指纹。
+     * 卸载清理和队列接管都要认出它们：留着的话，老队列里没落库的数据
+     * 就永远没人再看一眼了。
+     *
+     * @param string $key 完整键名
+     * @return bool
+     */
+    public static function isLegacyKey(string $key): bool
+    {
+        if (!str_starts_with($key, self::BASE)) {
+            return false;
+        }
+
+        $rest = substr($key, strlen(self::BASE));
+        $head = strstr($rest, ':', true);
+        $head = $head === false ? $rest : $head;
+
+        # 指纹是 12 位十六进制，第一段不长这样就说明是老键
+        return preg_match('/^[0-9a-f]{12}$/', $head) !== 1;
     }
 
     /**

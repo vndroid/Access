@@ -26,8 +26,9 @@ final class Schema
      * 当前表结构的版本
      *
      * 3.2.0：新增 event_id 列与其唯一索引（写入幂等）
+     * 3.2.1：MySQL 的 ip 列扩到 39 字符（完整展开的 IPv6 最长为 39）
      */
-    public const VERSION = '3.2.0';
+    public const VERSION = '3.2.1';
 
     /**
      * 升级步骤：目标版本 => 处理方法
@@ -36,6 +37,7 @@ final class Schema
      */
     private const STEPS = [
         '3.2.0' => 'toV320',
+        '3.2.1' => 'toV321',
     ];
 
     /**
@@ -57,11 +59,13 @@ final class Schema
      * @param string $fingerprint 统计库指纹（Migrate::fingerprint() 的结果）
      * @param bool $justCreated 本次是否刚建过表（新建的表天然就是最新结构）
      * @param Db|null $main Typecho 主库（版本号记在那里），null 表示自行获取
-     * @return array{from:?string,to:string,applied:string[],error:?string}
+     * @return array{from:?string,to:string,applied:string[],repaired:string[],error:?string}
+     *         applied  本次执行了哪些升级步骤
+     *         repaired 版本号已是最新、但实地校验发现缺失并补上的结构项
      */
     public static function ensure(Db $target, string $fingerprint, bool $justCreated, ?Db $main = null): array
     {
-        $result = ['from' => null, 'to' => self::VERSION, 'applied' => [], 'error' => null];
+        $result = ['from' => null, 'to' => self::VERSION, 'applied' => [], 'repaired' => [], 'error' => null];
 
         try {
             $main = $main ?? Database::main();
@@ -82,12 +86,36 @@ final class Schema
             return $result;
         }
 
-        if ($stored === self::VERSION) {
-            return $result;
-        }
-
         $table = $target->getPrefix() . 'access';
         $driver = Database::driver($target);
+
+        if ($stored === self::VERSION) {
+            /*
+             * 版本号对得上不代表结构真的到位。
+             * 历史上建索引的异常被无条件吞掉，版本号照记 —— 于是「有 event_id 列、
+             * 没有唯一索引、版本却是 3.2.0」会变成永久状态，此后每次启用都在这里直接返回，
+             * 再也没人发现幂等保护其实从来没生效过。
+             * 版本号只用来跳过升级步骤，不能用来跳过校验。
+             */
+            $gaps = self::gaps($target, $table);
+            if (empty($gaps)) {
+                return $result;
+            }
+
+            try {
+                self::toV320($target, $driver, $table);
+                $result['repaired'] = $gaps;
+            } catch (\Throwable $e) {
+                # 修不好就把版本号退回去，下次启用还会再试，而不是永远假装已经升级过
+                self::forget($main, $fingerprint);
+                $result['error'] = sprintf(
+                    '表结构校验发现缺失（%s），自动修复失败：%s',
+                    implode('、', $gaps),
+                    $e->getMessage()
+                );
+            }
+            return $result;
+        }
 
         foreach (self::STEPS as $version => $method) {
             if ($stored !== null && version_compare($stored, $version, '>=')) {
@@ -130,18 +158,87 @@ final class Schema
             $type = $driver === Driver::Pgsql ? 'varchar(32)' : 'char(32)';
             $column = $driver === Driver::Pgsql ? '"event_id"' : '`event_id`';
             $target->query("ALTER TABLE {$quoted} ADD COLUMN {$column} {$type} DEFAULT NULL", Db::WRITE);
+
+            if (!Database::columnExists($target, $table, 'event_id')) {
+                throw new \RuntimeException('ALTER TABLE 没有报错，但 event_id 列仍然不存在');
+            }
+        }
+
+        # 已经有单列唯一索引就什么都不用做（重复启用时的正常状态）
+        if (Database::uniqueIndexOn($target, $table, 'event_id')) {
+            return;
         }
 
         /*
-         * 建索引单独 try：MySQL 没有 CREATE INDEX IF NOT EXISTS，
-         * 而「列已经加上、索引也建过」是重复启用时的正常状态，不该当成失败。
+         * MySQL 没有 CREATE INDEX IF NOT EXISTS，所以这里仍然要 try，
+         * 但只能容忍「索引其实已经存在」这一种情况 —— 由建完之后的复核来判定。
+         * 以前是无条件吞掉：权限不足、存量数据有重复值都会被当成成功，
+         * 版本号照记 3.2.0，幂等保护实际从未生效。
          */
+        $index = $driver === Driver::Pgsql ? $table . '_event_id' : '`' . $table . '_event_id`';
+        $column = $driver === Driver::Pgsql ? '"event_id"' : '`event_id`';
+
+        $failure = null;
         try {
-            $index = $driver === Driver::Pgsql ? $table . '_event_id' : '`' . $table . '_event_id`';
-            $column = $driver === Driver::Pgsql ? '"event_id"' : '`event_id`';
             $target->query("CREATE UNIQUE INDEX {$index} ON {$quoted} ({$column})", Db::WRITE);
         } catch (\Throwable $e) {
+            $failure = $e;
         }
+
+        if (Database::uniqueIndexOn($target, $table, 'event_id')) {
+            return;
+        }
+
+        throw new \RuntimeException(sprintf(
+            'event_id 唯一索引创建失败：%s。缺少这个索引，队列重放会把同一条访问日志重复计入统计。'
+            . '常见原因是数据库账号没有建索引的权限，或存量数据里已经存在重复的 event_id。',
+            $failure !== null ? $failure->getMessage() : '语句执行后索引仍不存在'
+        ), 0, $failure);
+    }
+
+    /**
+     * 3.2.1：MySQL 的 char(38) 容不下 39 字符的完整展开 IPv6。
+     *
+     * PostgreSQL 的建表脚本一直是 varchar(39)，SQLite 不执行字符长度限制，
+     * 因此只有 MySQL 存量表需要 ALTER。
+     */
+    private static function toV321(Db $target, Driver $driver, string $table): void
+    {
+        if ($driver !== Driver::Mysql) {
+            return;
+        }
+
+        $quoted = $driver->quoteTable($table);
+        $target->query(
+            "ALTER TABLE {$quoted} MODIFY COLUMN `ip` char(39) DEFAULT '0' COMMENT 'IP'",
+            Db::WRITE
+        );
+    }
+
+    /**
+     * 关键结构里缺了什么
+     *
+     * 只查「少了会出错」的那几项，而不是全表比对：这是每次启用都要跑的路径。
+     *
+     * @param Db $target
+     * @param string $table 完整表名（含前缀）
+     * @return string[] 缺失项的中文描述，全都在就是空数组
+     */
+    private static function gaps(Db $target, string $table): array
+    {
+        $gaps = [];
+
+        if (!Database::columnExists($target, $table, 'event_id')) {
+            $gaps[] = 'event_id 列';
+            # 列都没有，索引不用查了
+            return $gaps;
+        }
+
+        if (!Database::uniqueIndexOn($target, $table, 'event_id')) {
+            $gaps[] = 'event_id 唯一索引';
+        }
+
+        return $gaps;
     }
 
     /**
