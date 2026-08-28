@@ -43,6 +43,14 @@ final class Queue
     private const NAME_LAST_FLUSH = 'queue:last_flush';
 
     /**
+     * 队首这一批「从什么时候开始就写不进去」的时间戳
+     *
+     * 只有把整批留下重试时才会写它，批次一旦确认掉就删。
+     * 用途见 STUCK_SECONDS。
+     */
+    private const NAME_STUCK_SINCE = 'queue:stuck_since';
+
+    /**
      * 加站点指纹之前用过的固定键名（旧前缀下的第一代）
      *
      * 升级之后队列会换到新键名上，这几个键里可能还压着没落库的访问日志。
@@ -95,6 +103,65 @@ final class Queue
         return Cache::key(self::NAME_LAST_FLUSH);
     }
 
+    /** 队首批次卡住的起始时间 */
+    private static function stuckSinceKey(): string
+    {
+        return Cache::key(self::NAME_STUCK_SINCE);
+    }
+
+    /**
+     * 记下「队首这批从现在开始卡住了」，已经记过就不覆盖
+     *
+     * @param Redis $redis
+     * @return void
+     */
+    private static function markStuck(Redis $redis): void
+    {
+        try {
+            # NX：第一次卡住的时间才是起点，后面每轮重试都覆盖的话永远到不了上限
+            $redis->set(self::stuckSinceKey(), time(), ['nx']);
+        } catch (\Throwable $e) {
+            // 记不下来只影响「卡多久放行」这一个判断，不该挡住刷库本身
+        }
+    }
+
+    /**
+     * 队首这批已经卡了多少秒，没卡住时返回 null
+     *
+     * @param Redis $redis
+     * @return int|null
+     */
+    private static function stuckFor(Redis $redis): ?int
+    {
+        try {
+            $since = $redis->get(self::stuckSinceKey());
+            if ($since === false || !is_numeric($since)) {
+                return null;
+            }
+            return max(0, time() - (int)$since);
+        } catch (\Throwable $e) {
+            /*
+             * 读不到就当没卡住。宁可晚一点放行也不能早放行 ——
+             * 早放行等于把还能救的数据提前扔进死信。
+             */
+            return null;
+        }
+    }
+
+    /**
+     * 批次确认掉了，卡住计时清零
+     *
+     * @param Redis $redis
+     * @return void
+     */
+    private static function clearStuck(Redis $redis): void
+    {
+        try {
+            $redis->del(self::stuckSinceKey());
+        } catch (\Throwable $e) {
+        }
+    }
+
     /**
      * 锁的存活时间（秒），防止刷库进程挂掉后死锁
      *
@@ -111,6 +178,19 @@ final class Queue
 
     /** 死信队列长度上限，超出后同样丢弃最旧的，避免脏数据把 Redis 撑爆 */
     public const DEAD_MAX_LENGTH = 10000;
+
+    /**
+     * 队首批次卡住多久之后，把写不进去的行强行转进死信（秒）
+     *
+     * 写入失败按 WriteErrorKind 分类之后，除了明确的数据错，其余一律留着重试 ——
+     * 这是对的，但也意味着一条谁也认不出的错误可以永远占着队首，后面的消息
+     * 全部堵死，直到队列涨到 MAX_LENGTH 开始丢最旧的。那还是丢数据，只是换了个位置。
+     *
+     * 所以给「留着重试」加一个上界。取一整天是因为要盖过真实故障的修复时间：
+     * 磁盘满、权限配错、备库没切回来，这些通常几小时内有人处理；
+     * 取短了（比如几分钟）就等于把一次运维故障变成一次数据丢失，那正是要防的事。
+     */
+    public const STUCK_SECONDS = 86400;
 
     /** 单次刷库最多处理多少条，防止一次请求耗时过长 */
     public const FLUSH_LIMIT = 5000;
@@ -383,6 +463,25 @@ LUA;
     private static function leftover(Redis $redis): array
     {
         $items = $redis->lRange(self::processingKey(), 0, -1);
+
+        /*
+         * lRange 失败返回 false，**绝不能当成「processing 是空的」**。
+         *
+         * 当成空的话流程会转去 claim() 取新一批，而 claim 的 Lua 是 RPUSH 到
+         * processing 尾部 —— 于是 processing 里前面压着上一批（还没落库），
+         * 后面接着新一批（马上要落库）。确认那一步是
+         * lTrim(processing, count($items), -1)，按**位置**从头部裁掉 count 个，
+         * 砍掉的正是前面那批还没落库的消息，留下的反而是已经落库的。
+         * 砍错批次，直接丢数据。所以这里必须抛出去，让本轮刷库停手。
+         */
+        if ($items === false) {
+            $error = $redis->getLastError();
+            $redis->clearLastError();
+            throw new \RuntimeException(
+                '读取 processing 失败：' . ($error !== null && $error !== '' ? $error : '未知错误')
+            );
+        }
+
         return is_array($items) ? $items : [];
     }
 
@@ -657,43 +756,104 @@ LUA;
                     }
                 }
 
-                // insertBatchDetailed 不抛异常，返回写入行数和失败行下标，必须按返回值判断成败
+                // insertBatchDetailed 不抛异常，返回写入行数、失败行下标和每个失败的归类
                 $outcome = empty($rows)
-                    ? ['written' => 0, 'failed' => []]
+                    ? ['written' => 0, 'failed' => [], 'kinds' => [], 'fatal' => null, 'error' => null]
                     : Migrate::insertBatchDetailed($db, $rows, self::COLUMNS);
                 $ok = $outcome['written'];
 
                 /*
-                 * 一条都没写进去有两种原因，光看失败数分不出来，必须探一次活：
-                 * 数据库挂了 —— 队列原样留着等下次重试；
-                 * 整批都是脏数据 —— 留着只会永远堵住队列，转进死信。
-                 * 之前这里一律当成前者，于是「队列尾部只剩一条脏数据」会让整个队列永久卡死。
+                 * 语句还没发出去就整批失败（连不上、拼不出语句）—— 一行 failed 都拿不到，
+                 * 没有任何依据说这批数据有问题，原样留着。
                  */
-                if ($ok === 0 && !empty($rows) && !Migrate::alive($db)) {
-                    # 不确认，这批原样停在 processing 里，下次刷库会先把它捡回来
+                if ($outcome['fatal'] !== null) {
+                    self::markStuck($redis);
                     $result['stopped'] = 'db';
                     $result['error'] = sprintf(
-                        '数据库不可用，本批 %d 条已保留在队列中等待重试',
-                        count($rows)
+                        '目标库写入失败（%s），本批 %d 条已保留在队列中等待重试：%s',
+                        $outcome['fatal']->name,
+                        count($items),
+                        (string)$outcome['error']
                     );
                     break;
                 }
 
-                $rejectedRows = array_fill_keys($outcome['failed'], true);
+                /*
+                 * 把失败行分成两堆：明确是这一行的错（转死信），和其余（留着重试）。
+                 *
+                 * 以前这里不分：只要 alive() 说数据库还活着，所有失败行一律 db-rejected
+                 * 进死信。而 alive() 走的是 SELECT —— 实测库处于只读事务、或账号的
+                 * INSERT 权限被回收时它照样成功，磁盘写满也一样。于是「每一条 INSERT
+                 * 都失败」被判成「每一条都是脏数据」，整个队列被倒进死信，
+                 * 死信满 DEAD_MAX_LENGTH 之后从最旧的开始丢 —— 静默的大规模数据丢失。
+                 * 判据改成 SQLSTATE，见 Database::classifyWriteError() 与 WriteErrorKind。
+                 */
+                $rejected = [];     // 下标 => true，明确的脏数据
+                $retry = [];        // 下标 => WriteErrorKind，留着重试的
+                foreach ($outcome['failed'] as $i) {
+                    $kind = $outcome['kinds'][$i] ?? WriteErrorKind::Unknown;
+                    if ($kind->shouldRetry()) {
+                        $retry[$i] = $kind;
+                    } else {
+                        $rejected[$i] = true;
+                    }
+                }
 
                 /*
-                 * 缓存失效的登记放在确认之前：这些行已经躺在数据库里了，
+                 * 缓存失效的登记必须放在下面任何一个 break 之前：这些行已经躺在数据库里了，
                  * 后面无论因为什么原因没能确认这一批，缓存该失效的照样得失效。
                  * 数据变了而缓存没变，比刷库失败本身更难发现。
                  */
                 if ($ok > 0) {
+                    $failedRows = array_fill_keys($outcome['failed'], true);
                     $written = empty($outcome['failed'])
                         ? $rows
-                        : array_values(array_diff_key($rows, $rejectedRows));
+                        : array_values(array_diff_key($rows, $failedRows));
                     foreach (Cache::datesOf($written) as $date) {
                         $dates[$date] = true;
                     }
                 }
+
+                /*
+                 * 有行要留着重试就不能确认这一批：Redis List 只能按位置整批 LTRIM，
+                 * 做不到「只确认成功的那几条」。整批留下，下轮重放 ——
+                 * 已经写进去的那部分由 event_id 唯一索引挡掉重复。
+                 *
+                 * 唯一的例外是这批已经卡了太久（STUCK_SECONDS）：那说明谁也没来修，
+                 * 再留下去就是让它堵到队列涨满、从最旧的开始丢。到点了就放行，
+                 * 把这些行按各自的归类转进死信，至少留下证据而不是无声消失。
+                 */
+                if (!empty($retry)) {
+                    $stuckFor = self::stuckFor($redis);
+
+                    if ($stuckFor === null || $stuckFor < self::STUCK_SECONDS) {
+                        self::markStuck($redis);
+                        $kinds = array_unique(array_map(static fn($k) => $k->name, $retry));
+                        $result['stopped'] = 'db';
+                        $result['error'] = sprintf(
+                            '本批 %d 条中有 %d 条写入失败且判定为环境问题（%s），'
+                            . '整批已保留在队列中等待重试，已卡住 %d 秒（上限 %d 秒）：%s',
+                            count($items),
+                            count($retry),
+                            implode('/', $kinds),
+                            (int)($stuckFor ?? 0),
+                            self::STUCK_SECONDS,
+                            (string)$outcome['error']
+                        );
+                        break;
+                    }
+
+                    # 卡过头了，放行：这些行转死信，本批照常确认
+                    $result['error'] = sprintf(
+                        '本批 %d 条已卡住 %d 秒（超过 %d 秒上限），其中 %d 条写不进去的已转入死信队列',
+                        count($items),
+                        (int)$stuckFor,
+                        self::STUCK_SECONDS,
+                        count($retry)
+                    );
+                }
+
+                $rejectedRows = $rejected + array_fill_keys(array_keys($retry), true);
 
                 /*
                  * 动 processing 之前最后一次确认锁还在自己手上。
@@ -731,15 +891,36 @@ LUA;
                 foreach ($items as $i => $item) {
                     if (!isset($rowOfItem[$i])) {
                         $dead[] = ['reason' => 'invalid-json', 'payload' => $item];
-                    } elseif (isset($rejectedRows[$rowOfItem[$i]])) {
-                        $dead[] = ['reason' => 'db-rejected', 'payload' => $item];
+                        continue;
                     }
+                    $row = $rowOfItem[$i];
+                    if (!isset($rejectedRows[$row])) {
+                        continue;
+                    }
+                    # 原因按归类记：db-rejected 是脏数据，db-environment/db-unknown 是卡过头才放行的
+                    $kind = $retry[$row] ?? WriteErrorKind::Data;
+                    $dead[] = ['reason' => $kind->reason(), 'payload' => $item];
                 }
 
                 $result['dead'] += self::pushDead($redis, $dead);
 
-                # 确认：这批已经有归宿（进了数据库或死信），从 processing 清掉
-                $redis->lTrim(self::processingKey(), count($items), -1);
+                /*
+                 * 确认：这批已经有归宿（进了数据库或死信），从 processing 清掉。
+                 * lTrim 失败必须当场停手 —— 当成成功的话，这批会在下一轮被
+                 * leftover() 再捡一次，而 attempted/written 已经按成功计过数了，
+                 * 调用方（flush-queue.php 的退出码、后台提示）会读到一个假的成功。
+                 */
+                if ($redis->lTrim(self::processingKey(), count($items), -1) === false) {
+                    $error = $redis->getLastError();
+                    $redis->clearLastError();
+                    throw new \RuntimeException(
+                        '确认批次失败（LTRIM processing）：'
+                        . ($error !== null && $error !== '' ? $error : '未知错误')
+                    );
+                }
+
+                # 这批确认掉了，卡住计时清零
+                self::clearStuck($redis);
 
                 $result['attempted'] += count($items);
                 $result['written']   += $ok;

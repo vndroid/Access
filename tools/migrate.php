@@ -125,8 +125,13 @@ try {
 
     if (!empty($argvOptions['forget-failed'])) {
         $forgotten = count(Migrate::failures($main, $fingerprint));
-        Migrate::clearFailures($main, $fingerprint);
-        out(sprintf('已清掉 %s 行失败记录（这些行不会被补写）。', number_format($forgotten)));
+        # 这也是一次写入，同样要让 --dry-run 挡住
+        if (!empty($argvOptions['dry-run'])) {
+            out(sprintf('--dry-run：本会清掉 %s 行失败记录，未执行。', number_format($forgotten)));
+        } else {
+            Migrate::clearFailures($main, $fingerprint);
+            out(sprintf('已清掉 %s 行失败记录（这些行不会被补写）。', number_format($forgotten)));
+        }
     }
 
     $known = Migrate::failures($main, $fingerprint);
@@ -140,6 +145,20 @@ try {
     }
     out();
 
+    /*
+     * --dry-run 必须挡在**所有**写入分支之前。
+     * 以前它排在下面「pending === 0 就标记完成」之后，于是
+     * `--dry-run` 会真的写下 access_migrate_done（顺带还可能清掉失败记录），
+     * 而这个标记一旦写下，isMarked() 此后每次都直接返回，源表再也没人看一眼。
+     * 一个名字叫「只看不动」的开关做了整个脚本里最不可逆的那件事。
+     */
+    if (!empty($argvOptions['dry-run'])) {
+        out($pending === 0
+            ? '--dry-run：没有需要迁移的数据（未写入完成标记）。'
+            : '--dry-run：未做任何写入。');
+        exit(0);
+    }
+
     if ($pending === 0) {
         if (!empty($known)) {
             # 行数对上了但失败记录还在，说明那几行是人工补进去的，顺手把记录清掉
@@ -147,11 +166,6 @@ try {
         }
         Migrate::mark($main, $fingerprint);
         out('没有需要迁移的数据，已标记为完成。');
-        exit(0);
-    }
-
-    if (!empty($argvOptions['dry-run'])) {
-        out('--dry-run：未做任何写入。');
         exit(0);
     }
 

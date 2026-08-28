@@ -344,7 +344,12 @@ final class Migrate
     public static function insertBatchDetailed(Db $target, array $rows, array $columnList): array
     {
         $rows = array_values($rows);
-        $result = ['written' => 0, 'failed' => []];
+        /*
+         * kinds  失败行下标 => WriteErrorKind，调用方靠它决定转死信还是留着重试
+         * fatal  语句还没发出去就失败了（连不上、拼不出语句），此时一行 failed 都给不出来，
+         *        调用方只能看这个字段 —— 它为非 null 就说明「整批都没写，且不是数据的错」
+         */
+        $result = ['written' => 0, 'failed' => [], 'kinds' => [], 'fatal' => null, 'error' => null];
         if (empty($rows)) {
             return $result;
         }
@@ -368,7 +373,14 @@ final class Migrate
                 $tuples[] = self::tuple($adapter, $row, $columnList);
             }
         } catch (\Throwable $e) {
-            // 连不上或拼不出语句，一条都没写进去，也没有「这行有问题」的信息可给
+            /*
+             * 连不上或拼不出语句，一条都没写进去，也没有「哪一行有问题」的信息可给。
+             * 以前这里直接 return 一个空壳，调用方看到 written=0 & failed=[] 只能靠
+             * alive() 去猜；而 alive() 走的是 SELECT，库只读或没有 INSERT 权限时照样成功，
+             * 于是整批被当成脏数据倒进死信。现在把判定结果如实带出去。
+             */
+            $result['fatal'] = Database::classifyWriteError($e);
+            $result['error'] = $e->getMessage();
             return $result;
         }
 
@@ -389,6 +401,10 @@ final class Migrate
                 $result['written']++;
             } catch (\Throwable $e) {
                 $result['failed'][] = $i;
+                $result['kinds'][$i] = Database::classifyWriteError($e);
+                if ($result['error'] === null) {
+                    $result['error'] = $e->getMessage();
+                }
             }
         }
 
@@ -460,9 +476,14 @@ final class Migrate
     /**
      * 连接探活
      *
-     * 用来区分「整批都写不进去」的两种原因：数据库挂了（数据必须留着重试），
-     * 还是这一批本身就是写不进去的脏数据（留着只会永远堵住队列）。
-     * 光看写入失败数是分不出来的。
+     * 只能回答「这个连接还通不通」，**回答不了「写得进去吗」**：
+     * 实测（PostgreSQL 16）库处于只读事务、或账号的 INSERT 权限被回收时，
+     * 这条探活照样成功，而每一条 INSERT 都失败。所以它不能再用来判断
+     * 「整批写不进去是不是因为脏数据」—— 那个判断改由 classifyWriteError() 按
+     * SQLSTATE 决定，见 WriteErrorKind。这里只保留「连接层面通不通」这一个用途。
+     *
+     * 探活走 Db::WRITE 而不是 Db::READ：读写在 Typecho 里可以注册成不同的服务器，
+     * 探到读节点活着并不说明写节点活着。
      *
      * @param Db $target
      * @return bool
@@ -470,7 +491,7 @@ final class Migrate
     public static function alive(Db $target): bool
     {
         try {
-            $target->query('SELECT 1', Db::READ);
+            $target->query('SELECT 1', Db::WRITE);
             return true;
         } catch (\Throwable $e) {
             return false;

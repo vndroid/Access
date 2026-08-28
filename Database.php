@@ -506,4 +506,80 @@ final class Database
             return false;
         }
     }
+
+    /**
+     * 从异常里取出 SQLSTATE
+     *
+     * 实测（PHP 8.4 + Typecho 的 Pdo 适配器 + PostgreSQL 16）：适配器把
+     * PDOException 的 code 原样传进 Typecho\Exception，而后者是直接给属性赋值、
+     * 不走 parent::__construct，所以含字母的 SQLSTATE（42P01、22P02）也完好无损地
+     * 以**字符串**形式留在 getCode() 里。但别只依赖它 —— 换个适配器或换个 PHP 版本
+     * 就未必了，消息里的 SQLSTATE[xxxxx] 前缀是 PDO 一定会写的，作为兜底。
+     *
+     * @param \Throwable $e
+     * @return string 五位 SQLSTATE，取不到时返回空串
+     */
+    public static function sqlState(\Throwable $e): string
+    {
+        $code = (string)$e->getCode();
+        if (preg_match('/^[0-9A-Za-z]{5}$/', $code) === 1) {
+            return strtoupper($code);
+        }
+
+        if (preg_match('/SQLSTATE\[([0-9A-Za-z]{5})\]/', $e->getMessage(), $m) === 1) {
+            return strtoupper($m[1]);
+        }
+
+        return '';
+    }
+
+    /**
+     * 写入失败是数据的错还是环境的错
+     *
+     * 这个判断决定一条写不进去的消息是转死信还是留着重试，判错的代价严重不对称
+     * （见 WriteErrorKind 的说明），所以只有明确属于「数据错」的 SQLSTATE 类别
+     * 才返回 Data，其余一律往「留着」的方向倒。
+     *
+     * @param \Throwable $e
+     * @return WriteErrorKind
+     */
+    public static function classifyWriteError(\Throwable $e): WriteErrorKind
+    {
+        $state = self::sqlState($e);
+        if ($state === '') {
+            return WriteErrorKind::Unknown;
+        }
+
+        $class = substr($state, 0, 2);
+
+        /*
+         * 22 数据异常（字段超长 22001、类型不符 22P02、除零 22012 …）
+         * 23 完整性约束冲突（唯一键 23505、非空 23502、外键 23503 …）
+         * 这两类换多少次时间重试都是同样的结果，确实是这一行本身写不进去。
+         */
+        if ($class === '22' || $class === '23') {
+            return WriteErrorKind::Data;
+        }
+
+        /*
+         * 明确属于环境的：
+         * 08 连接异常          25006 只读事务（备库 / default_transaction_read_only）
+         * 40 事务回滚（死锁、序列化失败，重试就好）
+         * 42 语法或访问规则 —— 表不存在 42P01、列不存在 42703、权限不足 42501。
+         *    这一类不是「这一行」的错，而是整套结构或权限出了问题，对每一行都一样。
+         *    归成 Data 的话，第一次结构没升级好就会把整个队列倒进死信。
+         * 53 资源不足（磁盘满 53100、内存不足 53200）
+         * 54 超出系统限制      55 对象状态不对
+         * 57 管理员介入（57P01 关库、57014 语句被取消）
+         * 58 系统层错误（IO 错误）
+         * XX PostgreSQL 内部错误（数据损坏）
+         * HY MySQL 的大杂烩，只读 1290、连接断开 2006/2013、磁盘满 1021 都在这儿
+         */
+        $environment = ['08', '25', '40', '42', '53', '54', '55', '57', '58', 'XX', 'HY'];
+        if (in_array($class, $environment, true)) {
+            return WriteErrorKind::Environment;
+        }
+
+        return WriteErrorKind::Unknown;
+    }
 }

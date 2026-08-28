@@ -1,5 +1,38 @@
 v3.2.3
 2026年08月28日
+    - **修复写库故障被误判成脏数据后整批倒进死信**。判定原来靠 Migrate::alive()：
+      一条都没写进去时探一次活，活着就认定「这批是脏数据」全部转死信。可 alive() 走的是
+      SELECT —— 实测 PostgreSQL 16 下，库处于只读事务（备库 / default_transaction_read_only）、
+      或账号 INSERT 权限被回收时，SELECT 1 照常成功而每一条 INSERT 都失败；磁盘写满同理。
+      于是一次运维故障会把整个队列倒进死信，死信满 DEAD_MAX_LENGTH 之后从最旧的开始丢，
+      静默的大规模数据丢失。现在按 SQLSTATE 分类（Database::classifyWriteError() +
+      新增的 WriteErrorKind）：只有 22（数据异常）和 23（完整性约束）两类算「这一行的错」
+      才转死信；08/25/40/42/53/54/55/57/58/XX/HY 一律算环境问题留着重试；认不出来的按环境处理。
+      42 类（表不存在、列不存在、权限不足）特意归到环境而不是数据 —— 它对每一行都一样，
+      归成数据的话一次结构没升好就会把整个队列清空
+    - insertBatchDetailed() 不再把异常整个丢掉，返回值新增 kinds（失败行下标 => 归类）
+      和 fatal（语句还没发出去就整批失败时的归类）。以前调用方只拿得到「哪几行失败」，
+      分不出为什么失败，才不得不去猜
+    - 新增 STUCK_SECONDS（24 小时）给「留着重试」封顶。全部留着重试是对的，但一条谁也认不出的
+      错误可以永远占着队首，后面的消息堵到队列涨满、从最旧的开始丢 —— 那还是丢数据，只是换了位置。
+      队首批次卡满 24 小时后放行，写不进去的按各自归类转入死信（db-environment / db-unknown），
+      与真正的脏数据（db-rejected）在死信里可区分。取一整天是为了盖过真实故障的修复时间
+    - Migrate::alive() 改用 Db::WRITE 探活，并在注释里写明它只能回答「连接通不通」，
+      回答不了「写得进去吗」，不能再拿它做脏数据判定
+    - **修复 processing 读取失败被当成「队列为空」**。leftover() 里 lRange 返回 false 时
+      原来直接当空数组，流程转去 claim() 取新一批 RPUSH 到 processing 尾部，
+      而确认那一步是按**位置** LTRIM 前 count 个 —— 砍掉的正是前面那批还没落库的消息，
+      留下的反而是已经落库的。砍错批次直接丢数据。现在照 claim() 的写法抛异常停手
+    - LTRIM 确认失败不再被当成成功：当成成功的话这批下轮会被 leftover() 再捡一次，
+      而 attempted/written 已按成功计过数，调用方会读到一个假的成功
+    - **修复前端埋点 URL 未编码**。原来是 '?u='+location.pathname+location.search+location.hash，
+      页面地址带 # 时拼出来的 # 是真 fragment，后面的 &cid&mid&rand 浏览器根本不发送，
+      整个埋点失效；带 & 时后续参数被拆散，页面地址里只要有 ?cid=xxx 就会顶掉真实的 cid，
+      统计挂到错误的文章上。改为 encodeURIComponent(...) 整体编码
+    - **修复 tools/migrate.php 的 --dry-run 并非只读**。它原来排在「pending === 0 就标记完成」
+      之后，于是一个名字叫「只看不动」的开关做了整个脚本里最不可逆的那件事：写下
+      access_migrate_done。这个标记一旦写下，isMarked() 此后每次直接返回，源表再也没人看一眼。
+      现在 dry-run 挡在所有写入分支之前，--forget-failed 的清理也一并纳入
     - Redis 键名前缀由 typecho_access: 改为 plugin:access:，与本站其他插件
       （Accelerate 的 plugin:accelerate:）统一到 plugin:{插件名}: 这套命名上。
       指纹段不动，完整键名仍是 plugin:access:{12 位指纹}:...。
