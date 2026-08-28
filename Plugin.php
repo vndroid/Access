@@ -66,15 +66,16 @@ class Plugin implements PluginInterface
          * 所以缺了它平时看不出问题 —— 正因如此更该在启用时就拦下来。
          */
         if (!extension_loaded('gmp')) {
-            throw new PluginException(_t('检测到当前 PHP 环境缺失 GMP 扩展（IPv6 地址解析需要）'));
+            throw new PluginException(_t('检测到当前 PHP 环境缺失 GMP 扩展（用于 IPv6 地址解析）'));
         }
         /*
          * event_id 的前 16 位十六进制是「毫秒时间戳左移 16 位」，
          * 32 位 PHP 上这个移位会溢出，生成的标识失去按毫秒聚簇的前缀，唯一索引的写入
          * 会退化成全表随机页写入。要求 64 位不是洁癖，是这个设计的前提。
+         * 写入队列的事件标识依赖 64 位整数运算。
          */
         if (PHP_INT_SIZE < 8) {
-            throw new PluginException(_t('本插件需要 64 位 PHP 环境（写入队列的事件标识依赖 64 位整数）'));
+            throw new PluginException(_t('仅支持 64 位 PHP 环境'));
         }
         # 有 config/current.yaml 就以它为准。注意这里只读文件，
         # 把设置数组直接交给 install()——Options 组件在一次请求里只读一遍插件配置，
