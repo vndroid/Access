@@ -59,19 +59,50 @@ class Core
     private const AGGREGATE_STALE_TTL = 604800;
 
     /**
-     * 「正在重算」标记的存活时间（秒）
+     * 「正在重算」互斥锁的存活时间（秒）
      *
      * 冷缓存时前端会反复轮询，不挡一下的话每轮询一次就多一条全表聚合在跑 ——
-     * 那正是把数据库 CPU 打满的形状。算失败时不主动清除这个标记，
-     * 让它自然过期，顺带成了失败退避。
+     * 那正是把数据库 CPU 打满的形状。
+     *
+     * **这个值必须覆盖一次重算的最坏耗时，而且不可能靠续租来兜底。**
+     * 续租要求持锁进程周期性醒过来，而重算是一次阻塞的 PDO 调用：
+     * PHP 停在 libpq / mysqlnd 的 read 上，中间没有任何执行点。
+     * 队列的 LOCK_TTL 能取 30 秒是因为刷库天然按批切开，批与批之间可以续租；
+     * 这里没有那个缝，只能把 TTL 一次性给够。
+     *
+     * 取值按实测的最坏情况留余量：n_distinct 没调之前，单条
+     * 「总计独立 IP」跑过 643 秒（HashAggregate 落盘重分区）。
+     * 两个方向的代价严重不对等，所以宁可给长：
+     *   给短了 → 锁提前过期，下一个请求再起一条同样的全表聚合，
+     *            几轮下来就是这个锁本来要防的那个形状；
+     *   给长了 → 持锁进程崩掉后重算被推迟最多这么久，但陈旧值照常返回
+     *            （AGGREGATE_STALE_TTL 有 7 天），用户只是看到稍旧的数字。
      */
-    private const AGGREGATE_LOCK_TTL = 300;
+    private const AGGREGATE_LOCK_TTL = 1800;
+
+    /**
+     * 重算失败后的退避时间（秒）
+     *
+     * 以前失败退避和互斥锁是同一个键：算失败就不删标记，让它自然过期。
+     * 但这两件事要的 TTL 方向相反 —— 互斥锁要长到覆盖最坏耗时，
+     * 退避只要挡住前端接下来几轮轮询就够。合用一个键时只能二选一，
+     * 选长了失败后要等半小时才肯重试，选短了锁就形同虚设。
+     * 现在拆成两个键，各给各的 TTL。
+     */
+    private const AGGREGATE_BACKOFF_TTL = 300;
 
     /** 值还没算出来时，告诉前端隔多久再来问（秒） */
     private const AGGREGATE_RETRY_AFTER = 2;
 
     /** 匿名埋点接口每个 IP 每分钟允许的次数 */
     private const TRACK_RATE_LIMIT = 60;
+
+    /**
+     * 限流计数键的存活时间（秒）
+     *
+     * 键名按分钟分桶、靠换键滚动，TTL 只是兜底回收，取两倍桶宽留出时钟误差余量。
+     */
+    private const TRACK_RATE_WINDOW = 120;
 
     public readonly UA $ua;
     public readonly Config $config;
@@ -329,6 +360,11 @@ class Core
      * 同一时间只允许一个请求去算：冷缓存时前端每隔两秒问一次，
      * 不挡的话每问一次就多一条全表聚合，几轮下来就把数据库压垮了。
      *
+     * 用两个键，因为「有人在算」和「刚算挂了，缓一缓」要的 TTL 方向相反：
+     *   {key}:computing  互斥锁，TTL = AGGREGATE_LOCK_TTL，必须覆盖最坏耗时
+     *   {key}:backoff    失败退避，TTL = AGGREGATE_BACKOFF_TTL，只要挡住几轮轮询
+     * 合用一个键的话两个 TTL 只能二选一，怎么选都是错的。
+     *
      * @access protected
      * @param string $key
      * @param callable $compute
@@ -342,8 +378,23 @@ class Core
         }
 
         $lockKey = Cache::key($key . ':computing');
+        $backoffKey = Cache::key($key . ':backoff');
+
+        /*
+         * 锁值用一次性随机 token 而不是固定的 '1'，理由同 Queue::acquireLock()：
+         * 重算有可能跑过 AGGREGATE_LOCK_TTL，此时锁已经过期、可能已被下一个请求抢走。
+         * 固定值分不出「我的锁」和「别人的锁」，收尾时一个 DEL 就把新持有者的锁删了，
+         * 于是第三个请求又能抢到，同一个聚合上并排跑好几条 —— 正是这把锁要防的东西。
+         * 这个坑刷库锁踩过一次（当年锁值是 PID），别在这儿再踩一遍。
+         */
+        $token = bin2hex(random_bytes(16));
+
         try {
-            if (!$redis->set($lockKey, '1', ['nx', 'ex' => self::AGGREGATE_LOCK_TTL])) {
+            # 上一轮刚算挂过就先别急着重试，免得前端每问一次就重跑一次全表聚合
+            if ($redis->exists($backoffKey)) {
+                return;
+            }
+            if (!$redis->set($lockKey, $token, ['nx', 'ex' => self::AGGREGATE_LOCK_TTL])) {
                 # 已经有人在算了
                 return;
             }
@@ -351,7 +402,7 @@ class Core
             return;
         }
 
-        register_shutdown_function(function () use ($key, $compute, $redis, $lockKey) {
+        register_shutdown_function(function () use ($key, $compute, $redis, $lockKey, $backoffKey, $token) {
             // 页面已经输出完毕，先把响应交给用户再慢慢算
             if (PHP_SAPI === 'fpm-fcgi' && function_exists('fastcgi_finish_request')) {
                 @fastcgi_finish_request();
@@ -360,13 +411,49 @@ class Core
 
             try {
                 $data = $compute();
+                /*
+                 * 即使这次重算超时、锁已经不在自己手上，算出来的值照样写回：
+                 * 它总比缓存里那个更新。真正不能做的是替别人释放锁，那由下面按 token 保证。
+                 */
                 $this->setCache($key, ['at' => time(), 'data' => $data], self::AGGREGATE_STALE_TTL);
-                # 只在成功后清标记；失败就让它自然过期，免得前端每问一次就重试一次
-                $redis->del($lockKey);
             } catch (\Throwable $e) {
-                // 算不出来不影响任何人，旧值还在，下次再说
+                // 算不出来不影响任何人，旧值还在。记一条退避，别让下一轮轮询立刻又来一遍
+                try {
+                    $redis->set($backoffKey, '1', ['ex' => self::AGGREGATE_BACKOFF_TTL]);
+                } catch (\Throwable $ignored) {
+                }
+            } finally {
+                $this->releaseAggregateLock($redis, $lockKey, $token);
             }
         });
+    }
+
+    /**
+     * 释放重算锁，且只释放自己那把
+     *
+     * 比较和删除必须原子：先 GET 再 DEL 的话，两步之间锁正好过期并被别人抢走，
+     * 那个 DEL 删掉的就是新持有者的锁。
+     *
+     * @access protected
+     * @param Redis $redis
+     * @param string $lockKey 完整键名
+     * @param string $token 抢锁时写进去的 token
+     * @return void
+     */
+    protected function releaseAggregateLock(Redis $redis, string $lockKey, string $token): void
+    {
+        try {
+            $script = <<<'LUA'
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+LUA;
+            $redis->eval($script, [$lockKey, $token], 1);
+        } catch (\Throwable $e) {
+            // 释放失败就让它自然过期，最坏是重算被推迟到锁过期为止
+        }
     }
 
     /**
@@ -1473,10 +1560,35 @@ class Core
             $ip = $this->request->getIp() ?: '0.0.0.0';
             # 按分钟分桶，键名自带时间戳，过期即天然滚动
             $key = Cache::key('rate:' . date('YmdHi') . ':' . md5($ip));
-            $hits = (int)$this->redis->incr($key);
-            if ($hits === 1) {
-                $this->redis->expire($key, 120);
+
+            /*
+             * INCR 和 EXPIRE 必须在一条 Lua 里。
+             *
+             * 分成两次往返时，「INCR 成功、EXPIRE 没成功」这个中间态会留下一个
+             * **永不过期**的计数键：EXPIRE 只在 hits === 1 时发，错过这一次就再没有
+             * 第二次机会。连接抖一下、或者恰好在两条命令之间断开就会发生。
+             * 单个键很小，但泄漏是按「分钟 × IP」累积的，跑得久了谁也想不起来它是什么。
+             *
+             * 顺带少一次往返 —— 这段代码在每一次匿名埋点请求上都要跑。
+             */
+            $script = <<<'LUA'
+local hits = redis.call("incr", KEYS[1])
+if hits == 1 then
+    redis.call("expire", KEYS[1], ARGV[1])
+end
+return hits
+LUA;
+            $hits = (int)$this->redis->eval($script, [$key, self::TRACK_RATE_WINDOW], 1);
+
+            /*
+             * 脚本没跑成时 eval 返回 false，转成 int 是 0 —— 那不是「这个 IP 一次都没来过」，
+             * 而是「这次没数着」。当成 0 会让限流悄悄失效且毫无征兆，所以显式判掉，
+             * 走和「没有 Redis」一样的放行分支：宁可不拦，也不误伤。
+             */
+            if ($hits < 1) {
+                return true;
             }
+
             return $hits <= self::TRACK_RATE_LIMIT;
         } catch (\Throwable $e) {
             // 限流自己出问题不该把正常统计一起拦下来
