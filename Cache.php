@@ -20,8 +20,21 @@ final class Cache
      * 本插件所有 Redis 键的公共开头
      *
      * 只用来识别「这是 Access 写的键」，实际键名一律走 prefix()。
+     * plugin:{插件名}: 是本站所有插件共用的命名规范（参见 Accelerate 的
+     * plugin:accelerate:），一眼能看出键属于哪个插件，也方便按前缀整体巡检。
      */
-    public const BASE = 'typecho_access:';
+    public const BASE = 'plugin:access:';
+
+    /**
+     * 换成新规范前缀之前用过的开头
+     *
+     * v3.2.3 以前所有键都长 typecho_access:... 这样，前后有两代：
+     *   - 加站点指纹之前：typecho_access:overview:total
+     *   - 加了指纹、还没换前缀：typecho_access:{指纹}:overview:total
+     * 只在卸载清理时用到（见 isLegacyKey()）—— 不认出它们的话，
+     * 这两代键会在 Redis 里留到天荒地老，谁也不知道是什么东西。
+     */
+    public const LEGACY_BASE = 'typecho_access:';
 
     /** 站点指纹算一次就够，一次请求里会用上几十遍 */
     private static ?string $prefix = null;
@@ -29,7 +42,7 @@ final class Cache
     /**
      * 键名前缀，带站点指纹
      *
-     * 以前是写死的 typecho_access:，于是多个站点共用一个 Redis DB 时，
+     * 以前是写死的 LEGACY_BASE，于是多个站点共用一个 Redis DB 时，
      * 队列、死信、刷库锁、统计缓存全都撞在一起 —— A 站的访问日志被 B 站
      * 消费掉写进 B 站的库，两边的刷库锁互相顶掉，缓存串着看。
      * 指纹取自插件目录（见 Health::fingerprint()）。
@@ -56,27 +69,38 @@ final class Cache
     }
 
     /**
-     * 这个键是不是「加指纹之前」留下的老键
+     * 这个键是不是旧前缀留下的、且该由本站点处理的老键
      *
-     * 老键长 typecho_access:overview:total 这样，新键中间多一段指纹。
-     * 卸载清理和队列接管都要认出它们：留着的话，老队列里没落库的数据
-     * 就永远没人再看一眼了。
+     * 旧前缀 LEGACY_BASE 下有两代键：
+     *   - 加指纹之前：typecho_access:overview:total（当年就不分站点，混用的）
+     *   - 加了指纹、还没换前缀：typecho_access:{指纹}:overview:total
+     * 卸载清理要把两代一并认出来，否则它们会永远留在 Redis 里。
+     *
+     * 但**不能**把「以旧前缀开头」当成充分条件：同一个 Redis 上别的站点的
+     * typecho_access:{别人的指纹}:... 也满足这个条件，认下来就等于删别人的队列 ——
+     * 当初加指纹要修的正是这个毛病，别在换前缀时把它放回来。
+     * 所以带指纹的那一代必须逐字比对本站点指纹，只有分不出站点的第一代才无条件认下。
      *
      * @param string $key 完整键名
      * @return bool
      */
     public static function isLegacyKey(string $key): bool
     {
-        if (!str_starts_with($key, self::BASE)) {
+        if (!str_starts_with($key, self::LEGACY_BASE)) {
             return false;
         }
 
-        $rest = substr($key, strlen(self::BASE));
+        $rest = substr($key, strlen(self::LEGACY_BASE));
         $head = strstr($rest, ':', true);
         $head = $head === false ? $rest : $head;
 
-        # 指纹是 12 位十六进制，第一段不长这样就说明是老键
-        return preg_match('/^[0-9a-f]{12}$/', $head) !== 1;
+        # 指纹是 12 位十六进制，第一段不长这样说明是加指纹之前的第一代键
+        if (preg_match('/^[0-9a-f]{12}$/', $head) !== 1) {
+            return true;
+        }
+
+        # 带指纹的第二代，只认本站点自己的，别人的原样放过
+        return $head === Health::fingerprint();
     }
 
     /**

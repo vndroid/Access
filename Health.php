@@ -291,7 +291,7 @@ final class Health
      */
     private static function cacheKey(string $name): string
     {
-        return 'typecho_access:' . self::fingerprint() . ':' . $name;
+        return Cache::key($name);
     }
 
     /**

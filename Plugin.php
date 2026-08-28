@@ -28,7 +28,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.2.2
+ * @version 3.2.3
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
@@ -136,7 +136,7 @@ class Plugin implements PluginInterface
          *
          * 这里以前调的是 flushQueue()：单次最多 FLUSH_LIMIT 条、抢不到锁直接返回 0、
          * 返回值还被丢掉，于是「刷过一次」被当成了「刷完了」，
-         * 紧接着 clearRedisCache() 把 typecho_access:* 一把梭删掉 ——
+         * 紧接着 clearRedisCache() 把本插件的键一把梭删掉 ——
          * 队列里没落库的访客数据就这么无声消失了。
          * 现在改成 drainQueue()：循环刷到取空为止，并如实回报还剩没剩。
          */
@@ -219,34 +219,38 @@ class Plugin implements PluginInterface
             /*
              * 使用 SCAN 迭代删除所有匹配前缀的键，避免 KEYS 阻塞。
              *
-             * 扫的是 typecho_access:*（含别的站点），但只删两类：
-             * 本站点指纹下的键，以及加指纹之前留下的老键。
+             * 要扫两个前缀：新规范的 plugin:access:*，以及 v3.2.3 之前的
+             * typecho_access:*。只扫新前缀的话，换前缀之前留下的键会永远残留。
+             *
+             * 两个前缀下都混着别的站点的键，所以只删两类：本站点指纹下的键，
+             * 以及旧前缀里加指纹之前留下的第一代老键（判定见 Cache::isLegacyKey()）。
              * 同一个 Redis 上别的站点的键必须原样放过 —— 以前键名不带指纹，
              * 这里的「一把梭删掉」就是在删别人的队列。
              */
-            $prefix = Cache::BASE . '*';
             $mine = Cache::prefix();
-            $iterator = null;
-            while (($keys = $redis->scan($iterator, $prefix, 100)) !== false) {
-                $keys = array_values(array_filter($keys, static function ($key) use ($mine) {
-                    $key = (string)$key;
-                    return str_starts_with($key, $mine) || Cache::isLegacyKey($key);
-                }));
+            foreach ([Cache::BASE . '*', Cache::LEGACY_BASE . '*'] as $pattern) {
+                $iterator = null;
+                while (($keys = $redis->scan($iterator, $pattern, 100)) !== false) {
+                    $keys = array_values(array_filter($keys, static function ($key) use ($mine) {
+                        $key = (string)$key;
+                        return str_starts_with($key, $mine) || Cache::isLegacyKey($key);
+                    }));
 
-                if ($keepQueue) {
-                    /*
-                     * 队列、死信、锁、刷库时间戳装的是还没落库的数据和它的处理状态，
-                     * 不是缓存。缓存删了会重算，这些删了就没了。
-                     */
-                    $keys = array_values(array_filter(
-                        $keys,
-                        static fn($key) => !Queue::isDataKey((string)$key)
-                            && !Queue::isLegacyDataKey((string)$key)
-                    ));
-                }
+                    if ($keepQueue) {
+                        /*
+                         * 队列、死信、锁、刷库时间戳装的是还没落库的数据和它的处理状态，
+                         * 不是缓存。缓存删了会重算，这些删了就没了。
+                         */
+                        $keys = array_values(array_filter(
+                            $keys,
+                            static fn($key) => !Queue::isDataKey((string)$key)
+                                && !Queue::isLegacyDataKey((string)$key)
+                        ));
+                    }
 
-                if (!empty($keys)) {
-                    $redis->del($keys);
+                    if (!empty($keys)) {
+                        $redis->del($keys);
+                    }
                 }
             }
 

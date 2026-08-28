@@ -43,12 +43,16 @@ final class Queue
     private const NAME_LAST_FLUSH = 'queue:last_flush';
 
     /**
-     * 加站点指纹之前用过的固定键名
+     * 加站点指纹之前用过的固定键名（旧前缀下的第一代）
      *
      * 升级之后队列会换到新键名上，这几个键里可能还压着没落库的访问日志。
      * adoptLegacy() 负责把它们接管过来，不接管就等于丢数据。
+     *
+     * 注意旧前缀下还有第二代（typecho_access:{指纹}:queue*，加了指纹但没换前缀），
+     * 那一代按 v3.2.3 的决定**不做接管**，只在卸载清理时被保护和识别，
+     * 见 isLegacyDataKey() 与 adoptLegacy() 的说明。
      */
-    private const LEGACY_PREFIX = 'typecho_access:queue';
+    private const LEGACY_PREFIX = Cache::LEGACY_BASE . 'queue';
 
     /** 待写入队列（Redis List） */
     public static function key(): string
@@ -783,17 +787,31 @@ LUA;
     }
 
     /**
-     * 这个键是不是「加站点指纹之前」的队列数据键
+     * 这个键是不是旧前缀（LEGACY_BASE）下的队列数据键
      *
      * 卸载清理时要和 isDataKey() 一起看：老键里同样可能压着没落库的数据，
-     * 只认新键名的话，清理会把它们当普通缓存删掉。
+     * 只认新键名的话，清理会把它们当普通缓存删掉 —— 那是静默丢数据。
+     *
+     * 旧前缀下两代都要认：
+     *   - typecho_access:queue、:processing、:dead、:lock、:last_flush
+     *   - typecho_access:{12 位指纹}:queue...
+     * 第二代不比对是不是本站点的指纹：这个函数只用来「拦住别删」，
+     * 而调用方（Plugin::clearRedisCache）传进来的键已经过 Cache::isLegacyKey()
+     * 筛过一道，别的站点的键根本走不到这里；宁可多拦也不能漏拦。
      *
      * @param string $key 完整键名
      * @return bool
      */
     public static function isLegacyDataKey(string $key): bool
     {
-        return str_starts_with($key, self::LEGACY_PREFIX);
+        # 第一代：加指纹之前的固定键名
+        if (str_starts_with($key, self::LEGACY_PREFIX)) {
+            return true;
+        }
+
+        # 第二代：加了指纹、还没换前缀
+        $pattern = '/^' . preg_quote(Cache::LEGACY_BASE, '/') . '[0-9a-f]{12}:' . self::NAME . '/';
+        return preg_match($pattern, $key) === 1;
     }
 
     /**
@@ -808,6 +826,12 @@ LUA;
      *
      * 多个站点共用一个 Redis 且都还在用老键名时，谁先接管谁拿走整条队列 ——
      * 这正是老键名本身的毛病，接管只是把它固定下来，不会让情况更糟。
+     *
+     * 只接管「加指纹之前」的第一代键。v3.2.3 把前缀从 typecho_access: 换成
+     * plugin:access: 时，旧前缀下带指纹的第二代（typecho_access:{指纹}:queue*）
+     * 按明确决定**不接管**，直接切到新键上：换前缀前请先把队列刷干净
+     * （tools/flush-queue.php，或在后台禁用一次插件），否则那批消息会滞留在
+     * 旧键上无人消费。真要接管的话，加进下面的 $moves 即可，逻辑是现成的。
      *
      * @param Redis $redis
      * @return array{adopted:string[],skipped:string[]} 接管了哪些、因新键已存在而跳过哪些
