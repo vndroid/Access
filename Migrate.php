@@ -1213,24 +1213,42 @@ final class Migrate
             }
 
             /*
-             * 结构在 v3.2.3 从「id 列表」变成了「id => 已尝试次数」。
-             * 升级上来的站点这一行还是老结构，就地折算成试过一次。
+             * 结构在 v3.2.3 从「id 列表」变成了「id => 已尝试次数」，
+             * 升级上来的站点这一行还是老结构，就地折算成「试过一次」。
+             *
+             * 两种结构解码出来都是「int 键 + int 值」的数组，逐个元素是分不开的：
+             * 老的 [101,205,307] 是 [0=>101,1=>205,2=>307]，
+             * 新的 {"101":1,"205":2} 是 [101=>1,205=>2]。
+             * 唯一可靠的判据是整体形状 —— 老结构是列表（键从 0 开始连续），
+             * 而新结构的键是源行 id，自增主键从 1 起，永远不会构成以 0 开头的连续序列。
+             * 按元素猜的写法会把 [101,205,307] 读成 {101:1, 1:205, 2:307}：
+             * 凭空造出失败行 1 和 2，同时把 205、307 丢掉。
              */
             $out = [];
             foreach ($decoded as $fingerprint => $entry) {
                 if (!is_array($entry)) {
                     continue;
                 }
-                $normalized = [];
-                foreach ($entry as $key => $value) {
-                    if (is_int($key) && !is_array($value) && (string)(int)$value === (string)$value && $key !== 0) {
-                        # 已经是 id => 次数
-                        $normalized[$key] = (int)$value;
-                    } else {
-                        # 老结构：值就是 id
-                        $normalized[(int)$value] = 1;
+
+                if (array_is_list($entry)) {
+                    # 老结构：值就是 id
+                    $normalized = [];
+                    foreach ($entry as $id) {
+                        if (is_scalar($id)) {
+                            $normalized[(int)$id] = 1;
+                        }
+                    }
+                } else {
+                    # 新结构：id => 次数
+                    $normalized = [];
+                    foreach ($entry as $id => $attempts) {
+                        if (is_scalar($attempts)) {
+                            $normalized[(int)$id] = max(1, (int)$attempts);
+                        }
                     }
                 }
+
+                ksort($normalized);
                 $out[$fingerprint] = $normalized;
             }
             return $out;
