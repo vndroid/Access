@@ -36,6 +36,9 @@ class Core
     /** 本次请求是否已经安排过刷库，避免重复注册 */
     protected bool $flushScheduled = false;
 
+    /** 缺 event_id 唯一索引的判定结果，一次请求里问一次就够 */
+    private ?bool $degraded = null;
+
     /** Redis 缓存键前缀 */
 
     /** 历史日期的统计不会再变化，缓存 40 天足够覆盖当月图表 */
@@ -1528,8 +1531,20 @@ LUA;
          */
         $rows = Queue::normalize($rows);
 
-        # 优先入队，攒批后统一落库；Redis 不可用或入队失败时退回直写
-        if (Queue::isEnabled($this->redis, $this->config) && Queue::push($this->redis, $rows)) {
+        /*
+         * 优先入队，攒批后统一落库；Redis 不可用或入队失败时退回直写。
+         *
+         * 但缺 event_id 唯一索引时**必须**走直写：队列做的是「至少一次」投递，
+         * 靠唯一索引把重复的那次挡掉才变成「恰好一次」的结果。索引不在的话
+         * （建索引权限不足、存量数据已有重复值），进程被杀后 processing 重放、
+         * 或者命令行重跑一次，同一条访问日志就会被重复计入统计 —— 而且毫无迹象，
+         * 数字只是慢慢变得不对。以前这种情况只在后台留一句黄字就放行了。
+         * 直写慢一些，但慢是看得见的，统计悄悄变错不是。
+         */
+        if (Queue::isEnabled($this->redis, $this->config)
+            && !$this->schemaDegraded()
+            && Queue::push($this->redis, $rows)
+        ) {
             $this->scheduleFlush();
             return;
         }
@@ -1538,6 +1553,34 @@ LUA;
             $this->db->query($this->db->insert('table.access')->rows($rows));
         } catch (\Throwable $e) {
         }
+    }
+
+    /**
+     * 这个统计库缺不缺幂等保护（event_id 唯一索引）
+     *
+     * 缺了就不能走写入队列，见 writeLogs()。判定结果按请求缓存：
+     * 一次请求可能写多条日志，而降级标记在一次请求内不会变。
+     *
+     * 注意标记存在**主库**的 options 里，不是统计库 —— 配了独立统计库时两者不是一回事，
+     * 所以这里不传 $this->db（那是统计库），让 Schema 自己去取主库。
+     *
+     * @access protected
+     * @return bool
+     */
+    protected function schemaDegraded(): bool
+    {
+        if ($this->degraded === null) {
+            try {
+                $this->degraded = Schema::isDegraded(
+                    Migrate::fingerprint(Database::settings($this->config))
+                );
+            } catch (\Throwable $e) {
+                # 判定不了就别拦着写入，理由同 Schema::isDegraded() 里的说明
+                $this->degraded = false;
+            }
+        }
+
+        return $this->degraded;
     }
 
     /**

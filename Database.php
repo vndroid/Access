@@ -265,17 +265,36 @@ final class Database
     public static function tableExists(Db $db, string $table): bool
     {
         try {
-            $sql = match (self::driver($db)) {
-                // current_schemas(false) 即当前 search_path，与未加限定的 CREATE TABLE 落点一致
-                Driver::Pgsql => "SELECT tablename FROM pg_catalog.pg_tables
-                                  WHERE schemaname = ANY (current_schemas(false)) AND tablename = '{$table}'",
-                Driver::Sqlite => "SELECT name FROM sqlite_master WHERE TYPE='table' AND name='{$table}'",
-                Driver::Mysql => "SHOW TABLES LIKE '{$table}'",
-            };
-            return !empty($db->fetchRow($db->query($sql, Db::READ)));
+            return self::tableExistsStrict($db, $table);
         } catch (\Throwable $e) {
             return false;
         }
+    }
+
+    /**
+     * 判断数据表是否存在，查不出来就抛
+     *
+     * 迁移路径必须用这个：容错版把「查询失败」和「表不存在」都答成 false，
+     * 而 Migrate::ensure() 见到 false 就打完成标记 —— 主库连接抖一下，
+     * 整张源表就被永久判定为「不存在历史数据」，此后 isMarked() 每次直接返回，
+     * 谁也不会再回头看它一眼。
+     *
+     * @param Db $db
+     * @param string $table 完整表名（含前缀）
+     * @return bool
+     * @throws \Throwable
+     */
+    public static function tableExistsStrict(Db $db, string $table): bool
+    {
+        $sql = match (self::driver($db)) {
+            // current_schemas(false) 即当前 search_path，与未加限定的 CREATE TABLE 落点一致
+            Driver::Pgsql => "SELECT tablename FROM pg_catalog.pg_tables
+                              WHERE schemaname = ANY (current_schemas(false)) AND tablename = '{$table}'",
+            Driver::Sqlite => "SELECT name FROM sqlite_master WHERE TYPE='table' AND name='{$table}'",
+            Driver::Mysql => "SHOW TABLES LIKE '{$table}'",
+        };
+
+        return !empty($db->fetchRow($db->query($sql, Db::READ)));
     }
 
     /**

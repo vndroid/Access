@@ -61,6 +61,34 @@ final class Migrate
     /** 失败 id 最多记这么多个，够定位问题即可，不让这一行无限变长 */
     private const MAX_FAILED_TRACKED = 500;
 
+    /**
+     * 迁移断点：已经确认扫过的源表 id
+     *
+     * 以前断点是从目标表 `MAX(id) WHERE id <= 源表最大 id` 推导出来的，那有两个错：
+     *
+     * 1. 大表迁移被推迟（pending > AUTO_LIMIT 走 Skipped）时，插件已经开始往目标库
+     *    写新日志，而目标表的 id 从 1 开始。这些新日志落在「迁移区间」里，
+     *    推导出来的断点直接跳到它们的最大 id —— 源表前面那一整截被静默跳过，
+     *    而且 migratedCount() 还把它们算成「已迁移」，连 pending 都是错的。
+     * 2. 写失败的行在目标表里是空洞，MAX(id) 天然跳过它们，于是失败行永远不会被重读。
+     *
+     * 所以断点必须自己存，存在主库，按目标库指纹分组。
+     */
+    private const CHECKPOINT_OPTION = 'access_migrate_checkpoint';
+
+    /** 断点/失败记录最多保留几个目标库，防止反复换库把这两行撑大 */
+    private const MAX_TRACKED_TARGETS = 8;
+
+    /**
+     * 同一行最多重试几次
+     *
+     * 失败行现在每轮开工前都会先补写一次（见 retryFailures()）。但一直失败的行
+     * 不能一直重试下去 —— 每轮都去读它、写它、再失败，迁移就再也走不完。
+     * 试满这个次数后不再自动补写，但记录保留着，完成标记照样打不下去，
+     * 人工修完再 --forget-failed 或者让它下一轮补上。
+     */
+    private const MAX_FAILED_ATTEMPTS = 3;
+
     /** 3.1.0 早期版本曾经把标记写在插件配置里，保留用于兼容与清理 */
     private const LEGACY_DONE_KEY = 'dbMigrateDone';
 
@@ -92,23 +120,53 @@ final class Migrate
             return $result;
         }
 
-        if (!Database::tableExists($main, $main->getPrefix() . 'access')) {
-            self::mark($main, $fingerprint);
+        /*
+         * 下面这一串探测全部走会抛异常的版本。
+         *
+         * 容错版把「查询失败」和「确实为空」答成同一个值（false / 0），而这里每一个
+         * 分支的出口都是 mark() —— 主库连接抖一下就足以让整张源表被永久判定为
+         * 「没有历史数据」，此后 isMarked() 每次直接返回，谁也不会再回头看它。
+         * 查不出来就什么都别做，下次再说。
+         */
+        try {
+            if (!Database::tableExistsStrict($main, $main->getPrefix() . 'access')) {
+                # 源表确实不存在，没什么可迁的
+                self::mark($main, $fingerprint);
+                return $result;
+            }
+
+            $total = self::sourceCountStrict($main);
+            $result['total'] = $total;
+            if ($total === 0) {
+                self::mark($main, $fingerprint);
+                return $result;
+            }
+
+            $maxSourceId = self::sourceMaxIdStrict($main);
+
+            /*
+             * 抬高目标表自增起点这一步必须排在 Skipped 分支**之前**。
+             *
+             * 以前它只在 run() 里做，而大表走的是下面那个 Skipped 分支、根本到不了
+             * run()。配置这时已经保存，插件立刻开始往目标库写新日志，目标表 id 从 1 起 ——
+             * 等管理员后来跑命令行迁移，这些新日志正落在迁移区间里：
+             * 旧的断点推导（目标表 MAX(id)）直接跳到它们的最大 id，源表前面一整截
+             * 被静默跳过；migratedCount() 还把它们算成「已迁移」，连 pending 都是错的。
+             * 抬高起点之后，目标库新产生的日志一律落在源表最大 id 之上，两边不再交叠。
+             */
+            self::reserveIdRange($target, $maxSourceId);
+
+            $checkpoint = self::resumeFrom($main, $target, $fingerprint, $maxSourceId);
+            $pending = self::pendingCount($main, $checkpoint);
+        } catch (\Throwable $e) {
+            # 探测本身失败：状态保持 None，什么标记都不打
             return $result;
         }
 
-        $total = self::sourceCount($main);
-        $result['total'] = $total;
-        if ($total === 0) {
-            self::mark($main, $fingerprint);
-            return $result;
-        }
-
-        $maxSourceId = self::sourceMaxId($main);
-        $pending = max(0, $total - self::migratedCount($target, $maxSourceId));
         $result['pending'] = $pending;
+        $result['failed'] = count(self::failures($main, $fingerprint));
 
-        if ($pending === 0) {
+        if ($pending === 0 && $result['failed'] === 0) {
             self::mark($main, $fingerprint);
             $result['status'] = MigrateStatus::Already;
             return $result;
@@ -158,13 +216,22 @@ final class Migrate
         }
 
         $total = self::sourceCount($main);
-        $migrated = $total > 0 ? self::migratedCount($target, self::sourceMaxId($main)) : 0;
+        if ($total === 0) {
+            return ['marked' => false, 'total' => 0, 'migrated' => 0, 'pending' => 0];
+        }
+
+        /*
+         * 进度同样按断点算，不按目标表行数算 —— 目标库自己产生的新日志
+         * 不是「已迁移的历史数据」，把它们算进来会显示成虚假的完成度。
+         */
+        $checkpoint = self::resumeFrom($main, $target, self::fingerprint($dbSettings), self::sourceMaxId($main));
+        $pending = self::pendingCountSafe($main, $checkpoint, $total);
 
         return [
             'marked' => false,
             'total' => $total,
-            'migrated' => min($migrated, $total),
-            'pending' => max(0, $total - $migrated),
+            'migrated' => max(0, $total - $pending),
+            'pending' => $pending,
         ];
     }
 
@@ -188,20 +255,35 @@ final class Migrate
         $deadline = $options['deadline'] ?? null;
         $progress = $options['progress'] ?? null;
 
-        $maxSourceId = self::sourceMaxId($main);
-        if ($maxSourceId <= 0) {
-            return ['moved' => 0, 'done' => true, 'lastId' => 0, 'failed' => 0, 'failedIds' => [], 'error' => null];
+        /*
+         * 断点存在主库、按目标库指纹分组，所以指纹是必需的。
+         * 以前它是可选的（不传就只是不记失败行），而断点又从目标表推导，
+         * 于是「不传指纹」这条路会静默地退化成没有任何持久状态的迁移。
+         */
+        $fingerprint = isset($options['fingerprint']) ? (string)$options['fingerprint'] : '';
+        if ($fingerprint === '') {
+            return self::runResult(0, false, 0, [], '缺少目标库指纹，无法记录断点，迁移未执行');
         }
 
-        # 先抬高目标表的自增起点，给迁移数据留出主键区间
-        self::reserveIdRange($target, $maxSourceId);
+        try {
+            $maxSourceId = self::sourceMaxIdStrict($main);
+            $total = self::sourceCountStrict($main);
+        } catch (\Throwable $e) {
+            # 查不出来 ≠ 源表是空的。以前这里返回 done=true，一次查询超时就宣布迁移完成
+            return self::runResult(0, false, 0, [], '读取源表失败，迁移未执行：' . $e->getMessage());
+        }
 
-        $total = self::sourceCount($main);
-        $already = self::migratedCount($target, $maxSourceId);
-        $lastId = self::resumeFrom($target, $maxSourceId);
-        $moved = 0;
-        $done = true;
-        $error = null;
+        if ($maxSourceId <= 0) {
+            # 确实一行都没有，这才是真的没什么可迁的
+            return self::runResult(0, true, 0, [], null);
+        }
+
+        /*
+         * 先抬高目标表的自增起点，给迁移数据留出主键区间。
+         * ensure() 在走 Skipped 分支之前也会调一次 —— 那条路根本到不了这里，
+         * 而插件保存完设置就开始往目标库写新日志了。
+         */
+        self::reserveIdRange($target, $maxSourceId);
 
         @set_time_limit(0);
 
@@ -212,10 +294,17 @@ final class Migrate
          */
         $columns = self::usableColumns($main, $main->getPrefix() . 'access', self::COLUMNS);
 
-        $fingerprint = isset($options['fingerprint']) ? (string)$options['fingerprint'] : null;
+        # 上几轮写不进去的行，先补写一次再往下扫
+        $retried = self::retryFailures($main, $target, $fingerprint, $columns);
+
+        $lastId = self::resumeFrom($main, $target, $fingerprint, $maxSourceId);
+        $already = max(0, $total - self::pendingCountSafe($main, $lastId, $total));
+        $moved = $retried['written'];
+        $done = true;
+        $error = $retried['error'];
         $failedIds = [];
 
-        while (true) {
+        while ($error === null) {
             $rows = $main->fetchAll(
                 $main->select(...$columns)
                     ->from('table.access')
@@ -258,38 +347,59 @@ final class Migrate
             }
 
             /*
-             * 一行都没写进去、又拿不到「哪几行有问题」—— 失败发生在语句之前：
-             * 连不上目标库，或者语句根本拼不出来。
-             *
-             * 这种情况既不能推进断点也不能继续扫。以前照样往下走，
-             * 于是整张表被「扫完」了却一行都没搬过去，最后还返回 done=true，
-             * 迁移完成标记一写，源表从此没人再看一眼。
+             * 语句还没发出去就整批失败：连不上目标库，或者语句根本拼不出来。
+             * 既不能推进断点也不能继续扫 —— 以前照样往下走，于是整张表被「扫完」了
+             * 却一行都没搬过去，最后还返回 done=true，完成标记一写，源表从此没人再看。
              */
-            if ($outcome['written'] === 0 && empty($outcome['failed'])) {
+            if ($outcome['fatal'] !== null) {
                 $done = false;
-                $error = '目标库写入失败（连接不可用，或语句无法构造），断点未推进，请检查后重新执行';
+                $error = sprintf(
+                    '目标库写入失败（%s），断点未推进，请检查后重新执行：%s',
+                    $outcome['fatal']->name,
+                    (string)$outcome['error']
+                );
                 break;
             }
 
             $moved += $outcome['written'];
-            $lastId = (int)$rows[count($rows) - 1]['id'];
-
-            if ($progress !== null) {
-                $progress($already + $moved, $total, $lastId);
-            }
 
             /*
-             * 有行确实写不进去就停手，不再往下扫。
-             * 以前这里只推进 checkpoint 继续跑：失败行落在新 checkpoint 之前，
-             * 从此没人再看它一眼，而扫到头之后照样返回 done=true ——
-             * 迁移「完成」了，数据少了一截，还没有任何痕迹。
+             * 断点推进到本批末尾，写不进去的那几行单独记进失败清单。
+             *
+             * 靠断点「停在失败行之前」是行不通的：那一行如果永远写不进去，
+             * 迁移就永远卡在同一个位置，后面几百万行谁也别想过去。
+             * 所以断点照常推进，失败行由 failures 清单负责 ——
+             * 每轮开工前 retryFailures() 会补写它们，而只要清单非空，
+             * 完成标记就打不下去（见 ensure() 与命令行脚本）。
              */
+            $lastId = (int)$rows[count($rows) - 1]['id'];
+
             if (!empty($outcome['failed'])) {
                 foreach ($outcome['failed'] as $i) {
                     $failedIds[] = (int)$rows[$i]['id'];
                 }
                 $done = false;
+            }
+
+            /*
+             * 断点和失败清单必须在同一轮里落库，且失败清单先写。
+             * 反过来的话，断点存下了而失败清单没存下，那几行就成了
+             * 「断点已经越过、也没人记得」—— 正是这次要修掉的形态。
+             */
+            try {
+                if (!empty($failedIds)) {
+                    self::recordFailures($main, $fingerprint, $failedIds);
+                    $failedIds = [];
+                }
+                self::saveCheckpoint($main, $fingerprint, $lastId);
+            } catch (\Throwable $e) {
+                $done = false;
+                $error = '断点或失败记录写入主库失败，请检查后重新执行：' . $e->getMessage();
                 break;
+            }
+
+            if ($progress !== null) {
+                $progress($already + $moved, $total, $lastId);
             }
 
             if ($deadline !== null && microtime(true) >= $deadline) {
@@ -298,18 +408,54 @@ final class Migrate
             }
         }
 
-        if (!empty($failedIds) && $fingerprint !== null) {
-            self::recordFailures($main, $fingerprint, $failedIds);
-        }
+        $remaining = count(self::failureAttempts($main, $fingerprint));
 
+        return self::runResult(
+            $moved,
+            $done && $remaining === 0 && $error === null,
+            $lastId,
+            self::failures($main, $fingerprint),
+            $error
+        );
+    }
+
+    /**
+     * run() 的返回值形状，集中在一处以免各分支拼错
+     *
+     * @param int $moved
+     * @param bool $done
+     * @param int $lastId
+     * @param int[] $failedIds
+     * @param string|null $error
+     * @return array
+     */
+    private static function runResult(int $moved, bool $done, int $lastId, array $failedIds, ?string $error): array
+    {
         return [
             'moved'     => $moved,
-            'done'      => $done && empty($failedIds),
+            'done'      => $done,
             'lastId'    => $lastId,
             'failed'    => count($failedIds),
             'failedIds' => $failedIds,
             'error'     => $error,
         ];
+    }
+
+    /**
+     * 已扫过的行数，纯粹用于进度显示，查不出来就当 0
+     *
+     * @param Db $main
+     * @param int $checkpoint
+     * @param int $total
+     * @return int
+     */
+    private static function pendingCountSafe(Db $main, int $checkpoint, int $total): int
+    {
+        try {
+            return self::pendingCount($main, $checkpoint);
+        } catch (\Throwable $e) {
+            return $total;
+        }
     }
 
     /**
@@ -456,6 +602,17 @@ final class Migrate
      * @param array $columnList
      * @return array
      */
+    /**
+     * 源表实际可用的列（对外用，命令行脚本补写失败行时要传给 retryFailures()）
+     *
+     * @param Db $main
+     * @return array
+     */
+    public static function usableColumnsFor(Db $main): array
+    {
+        return self::usableColumns($main, $main->getPrefix() . 'access', self::COLUMNS);
+    }
+
     private static function usableColumns(Db $db, string $table, array $columnList): array
     {
         if (!in_array('event_id', $columnList, true)) {
@@ -552,27 +709,71 @@ final class Migrate
     }
 
     /**
-     * 源表总行数
+     * 源表总行数（容错版，查不出来时返回 0）
+     *
+     * **迁移路径不能用这个**，用 sourceCountStrict()。
+     * 「查询失败」和「表是空的」在这里都返回 0，而 ensure() 见到 0 就打完成标记 ——
+     * 主库一次超时就足以让整张源表被永久判定为「没有历史数据」。
+     * 这个容错版只留给展示类调用：数字显示成 0 无非是不好看。
      */
     public static function sourceCount(Db $main): int
     {
         try {
-            return (int)$main->fetchAll($main->select('COUNT(1) AS count')->from('table.access'))[0]['count'];
+            return self::sourceCountStrict($main);
         } catch (\Throwable $e) {
             return 0;
         }
     }
 
     /**
-     * 源表最大主键
+     * 源表总行数（查不出来就抛）
+     *
+     * @throws \Throwable
+     */
+    public static function sourceCountStrict(Db $main): int
+    {
+        return (int)$main->fetchAll($main->select('COUNT(1) AS count')->from('table.access'))[0]['count'];
+    }
+
+    /**
+     * 源表里还没扫过的行数（id > 断点）
+     *
+     * 取代了原来的「总行数 - 目标表迁移区间行数」：后者会把目标库自己产生的新日志
+     * 算成已迁移，得出的 pending 偏小，甚至直接得出 0 而打下完成标记。
+     * 改成只问源表，问题就不存在了 —— 谁扫到哪儿是断点说了算，与目标表无关。
+     *
+     * @throws \Throwable
+     */
+    public static function pendingCount(Db $main, int $checkpoint): int
+    {
+        return (int)$main->fetchAll(
+            $main->select('COUNT(1) AS count')->from('table.access')->where('id > ?', $checkpoint)
+        )[0]['count'];
+    }
+
+    /**
+     * 源表最大主键（容错版，查不出来时返回 0）
+     *
+     * 同 sourceCount()：迁移路径请用 sourceMaxIdStrict()。
+     * run() 见到 0 会直接返回 done=true，一次查询失败就等于宣布迁移完成。
      */
     public static function sourceMaxId(Db $main): int
     {
         try {
-            return (int)($main->fetchAll($main->select('MAX(id) AS max_id')->from('table.access'))[0]['max_id'] ?? 0);
+            return self::sourceMaxIdStrict($main);
         } catch (\Throwable $e) {
             return 0;
         }
+    }
+
+    /**
+     * 源表最大主键（查不出来就抛）
+     *
+     * @throws \Throwable
+     */
+    public static function sourceMaxIdStrict(Db $main): int
+    {
+        return (int)($main->fetchAll($main->select('MAX(id) AS max_id')->from('table.access'))[0]['max_id'] ?? 0);
     }
 
     /**
@@ -590,16 +791,130 @@ final class Migrate
     }
 
     /**
-     * 续传起点：目标表中不超过源表最大 id 的最大 id
+     * 续传起点
+     *
+     * 优先用主库里存的断点。没有断点（老版本升上来、迁移做到一半）时才退回
+     * 「目标表中不超过源表最大 id 的最大 id」这个旧推导 —— 它不准（见
+     * CHECKPOINT_OPTION 的说明），但对「一直用旧版本、从没走过 Skipped 路径」
+     * 的站点是对的，比从 0 重扫一遍强。退回一次之后就会存下断点，此后不再推导。
+     *
+     * @param Db $main
+     * @param Db $target
+     * @param string $fingerprint
+     * @param int $maxSourceId
+     * @return int
      */
-    public static function resumeFrom(Db $target, int $maxSourceId): int
+    public static function resumeFrom(Db $main, Db $target, string $fingerprint, int $maxSourceId): int
     {
+        $stored = self::checkpoint($main, $fingerprint);
+        if ($stored !== null) {
+            return $stored;
+        }
+
         try {
             return (int)($target->fetchAll(
                 $target->select('MAX(id) AS max_id')->from('table.access')->where('id <= ?', $maxSourceId)
             )[0]['max_id'] ?? 0);
         } catch (\Throwable $e) {
             return 0;
+        }
+    }
+
+    /**
+     * 读出已存的断点，没存过返回 null
+     *
+     * @param Db $main
+     * @param string $fingerprint
+     * @return int|null
+     */
+    public static function checkpoint(Db $main, string $fingerprint): ?int
+    {
+        try {
+            $row = $main->fetchRow(
+                $main->select()->from('table.options')->where('name = ?', self::CHECKPOINT_OPTION)
+            );
+            if (empty($row['value'])) {
+                return null;
+            }
+            $all = json_decode((string)$row['value'], true);
+            if (!is_array($all) || !array_key_exists($fingerprint, $all)) {
+                return null;
+            }
+            return (int)$all[$fingerprint];
+        } catch (\Throwable $e) {
+            /*
+             * 读不到断点就当没有，退回旧推导 —— 那只会让扫描从更早的位置重来，
+             * event_id 唯一索引与 ON CONFLICT 会挡掉重复写入。宁可重扫也不能跳过。
+             */
+            return null;
+        }
+    }
+
+    /**
+     * 存下断点
+     *
+     * **写失败必须抛**：断点没存下而调用方以为存下了，下一轮又从旧位置开始，
+     * 那还只是重扫；真正致命的是「done=true 且断点没存下」——
+     * 完成标记一打，源表从此没人看。所以这里的失败要能一路传到 run() 的返回值里。
+     *
+     * @param Db $main
+     * @param string $fingerprint
+     * @param int $lastId
+     * @return void
+     * @throws \Throwable
+     */
+    public static function saveCheckpoint(Db $main, string $fingerprint, int $lastId): void
+    {
+        $row = $main->fetchRow(
+            $main->select()->from('table.options')->where('name = ?', self::CHECKPOINT_OPTION)
+        );
+        $all = empty($row['value']) ? [] : (json_decode((string)$row['value'], true) ?: []);
+        if (!is_array($all)) {
+            $all = [];
+        }
+
+        $all[$fingerprint] = $lastId;
+        if (count($all) > self::MAX_TRACKED_TARGETS) {
+            $all = array_slice($all, -self::MAX_TRACKED_TARGETS, null, true);
+        }
+        $value = json_encode($all);
+
+        if (empty($row)) {
+            $main->query($main->insert('table.options')
+                ->rows(['name' => self::CHECKPOINT_OPTION, 'user' => 0, 'value' => $value]));
+        } else {
+            $main->query($main->update('table.options')
+                ->rows(['value' => $value])
+                ->where('name = ?', self::CHECKPOINT_OPTION));
+        }
+    }
+
+    /**
+     * 清掉断点（重新开始迁移、或换库之后调用）
+     *
+     * @param Db $main
+     * @param string|null $fingerprint 为 null 时清空整行
+     * @return void
+     */
+    public static function clearCheckpoint(Db $main, ?string $fingerprint = null): void
+    {
+        try {
+            if ($fingerprint === null) {
+                $main->query($main->delete('table.options')->where('name = ?', self::CHECKPOINT_OPTION));
+                return;
+            }
+            $row = $main->fetchRow(
+                $main->select()->from('table.options')->where('name = ?', self::CHECKPOINT_OPTION)
+            );
+            $all = empty($row['value']) ? [] : (json_decode((string)$row['value'], true) ?: []);
+            if (!is_array($all)) {
+                return;
+            }
+            unset($all[$fingerprint]);
+            $main->query($main->update('table.options')
+                ->rows(['value' => json_encode($all)])
+                ->where('name = ?', self::CHECKPOINT_OPTION));
+        } catch (\Throwable $e) {
         }
     }
 
@@ -677,8 +992,9 @@ final class Migrate
             $main->query($main->delete('table.options')->where('name = ?', self::DONE_OPTION));
         } catch (\Throwable $e) {
         }
-        # 完成标记和失败记录是同一件事的两面，清一个就得清另一个
+        # 完成标记、失败记录、断点是同一件事的三面，清一个就得全清
         self::clearFailures($main);
+        self::clearCheckpoint($main);
         self::cleanupLegacyMarker($main);
     }
 
@@ -691,9 +1007,104 @@ final class Migrate
      */
     public static function failures(Db $main, string $fingerprint): array
     {
+        return array_keys(self::failureAttempts($main, $fingerprint));
+    }
+
+    /**
+     * 失败行以及各自已经试了几次
+     *
+     * @param Db $main
+     * @param string $fingerprint
+     * @return array<int, int> 源行 id => 已尝试次数
+     */
+    public static function failureAttempts(Db $main, string $fingerprint): array
+    {
         $all = self::readFailed($main);
-        $ids = $all[$fingerprint] ?? [];
-        return is_array($ids) ? array_map('intval', $ids) : [];
+        $entry = $all[$fingerprint] ?? [];
+        return is_array($entry) ? $entry : [];
+    }
+
+    /**
+     * 把之前写不进去的行再补写一次
+     *
+     * 每轮迁移开工前先做这件事。以前失败行根本没有重试路径：断点是从目标表
+     * MAX(id) 推出来的，失败行在目标表里是空洞，MAX(id) 天然跳过它们，
+     * 于是「记下来了」等于「记下来就没人管了」，只能靠人工。
+     *
+     * 试满 MAX_FAILED_ATTEMPTS 次的不再自动补写，但记录留着 —— 完成标记照样
+     * 打不下去，这是它存在的意义。
+     *
+     * @param Db $main
+     * @param Db $target
+     * @param string $fingerprint
+     * @param array $columns 源表实际可用的列
+     * @return array{written:int, remaining:int, error:?string}
+     */
+    public static function retryFailures(Db $main, Db $target, string $fingerprint, array $columns): array
+    {
+        $out = ['written' => 0, 'remaining' => 0, 'error' => null];
+
+        $attempts = self::failureAttempts($main, $fingerprint);
+        if (empty($attempts)) {
+            return $out;
+        }
+
+        $retryable = array_keys(array_filter(
+            $attempts,
+            static fn(int $n): bool => $n < self::MAX_FAILED_ATTEMPTS
+        ));
+        $out['remaining'] = count($attempts);
+
+        if (empty($retryable)) {
+            return $out;
+        }
+
+        try {
+            $rows = $main->fetchAll(
+                $main->select(...$columns)->from('table.access')
+                    ->where('id IN ?', $retryable)
+                    ->order('id', Db::SORT_ASC)
+            );
+        } catch (\Throwable $e) {
+            $out['error'] = $e->getMessage();
+            return $out;
+        }
+
+        /*
+         * 源行已经不在了（被人删掉）就不该继续挂着：它永远补不回来，
+         * 留在失败清单里只会让完成标记永远打不下去。当成「已处理」摘掉。
+         */
+        $found = array_map(static fn(array $r): int => (int)$r['id'], $rows);
+        $vanished = array_values(array_diff($retryable, $found));
+
+        $rows = array_values($rows);
+        $outcome = empty($rows)
+            ? ['written' => 0, 'failed' => [], 'kinds' => [], 'fatal' => null, 'error' => null]
+            : self::insertBatchDetailed($target, $rows, $columns);
+
+        if ($outcome['fatal'] !== null) {
+            # 连不上／拼不出语句，这一轮谁也补不了，次数不该记在这些行头上
+            $out['error'] = (string)$outcome['error'];
+            return $out;
+        }
+
+        $stillFailed = [];
+        foreach ($outcome['failed'] as $i) {
+            $stillFailed[] = (int)$rows[$i]['id'];
+        }
+
+        $done = array_values(array_diff($found, $stillFailed));
+        $out['written'] = count($done);
+
+        try {
+            self::resolveFailures($main, $fingerprint, array_merge($done, $vanished), $stillFailed);
+        } catch (\Throwable $e) {
+            $out['error'] = $e->getMessage();
+            return $out;
+        }
+
+        $out['remaining'] = count(self::failureAttempts($main, $fingerprint));
+        return $out;
     }
 
     /**
@@ -713,12 +1124,52 @@ final class Migrate
         }
 
         $all = self::readFailed($main);
-        $merged = array_values(array_unique(array_merge($all[$fingerprint] ?? [], array_map('intval', $ids))));
-        sort($merged);
+        $entry = $all[$fingerprint] ?? [];
+
+        foreach ($ids as $id) {
+            $id = (int)$id;
+            $entry[$id] = ($entry[$id] ?? 0) + 1;
+        }
+        ksort($entry);
 
         # 只留前面这些，够定位问题就行，不让这一行无限变长
-        $all[$fingerprint] = array_slice($merged, 0, self::MAX_FAILED_TRACKED);
+        if (count($entry) > self::MAX_FAILED_TRACKED) {
+            $entry = array_slice($entry, 0, self::MAX_FAILED_TRACKED, true);
+        }
+        $all[$fingerprint] = $entry;
 
+        self::writeFailed($main, $all);
+    }
+
+    /**
+     * 补写的结果落账：写成功（或源行已不存在）的摘掉，仍失败的次数加一
+     *
+     * @param Db $main
+     * @param string $fingerprint
+     * @param int[] $resolved 不必再管的 id
+     * @param int[] $stillFailed 这轮又失败的 id
+     * @return void
+     * @throws \Throwable
+     */
+    private static function resolveFailures(
+        Db $main,
+        string $fingerprint,
+        array $resolved,
+        array $stillFailed
+    ): void {
+        $all = self::readFailed($main);
+        $entry = $all[$fingerprint] ?? [];
+
+        foreach ($resolved as $id) {
+            unset($entry[(int)$id]);
+        }
+        foreach ($stillFailed as $id) {
+            $id = (int)$id;
+            $entry[$id] = ($entry[$id] ?? 0) + 1;
+        }
+        ksort($entry);
+
+        $all[$fingerprint] = $entry;
         self::writeFailed($main, $all);
     }
 
@@ -757,7 +1208,32 @@ final class Migrate
                 return [];
             }
             $decoded = json_decode((string)$row['value'], true);
-            return is_array($decoded) ? $decoded : [];
+            if (!is_array($decoded)) {
+                return [];
+            }
+
+            /*
+             * 结构在 v3.2.3 从「id 列表」变成了「id => 已尝试次数」。
+             * 升级上来的站点这一行还是老结构，就地折算成试过一次。
+             */
+            $out = [];
+            foreach ($decoded as $fingerprint => $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $normalized = [];
+                foreach ($entry as $key => $value) {
+                    if (is_int($key) && !is_array($value) && (string)(int)$value === (string)$value && $key !== 0) {
+                        # 已经是 id => 次数
+                        $normalized[$key] = (int)$value;
+                    } else {
+                        # 老结构：值就是 id
+                        $normalized[(int)$value] = 1;
+                    }
+                }
+                $out[$fingerprint] = $normalized;
+            }
+            return $out;
         } catch (\Throwable $e) {
             return [];
         }
@@ -770,23 +1246,29 @@ final class Migrate
      */
     private static function writeFailed(Db $main, array $all): void
     {
-        try {
-            $all = array_filter($all, static fn($ids): bool => !empty($ids));
-            $value = json_encode($all);
+        /*
+         * **不吞异常。**
+         *
+         * 这一行记的是「有行没迁过去」，而它是唯一挡住完成标记的东西：
+         * ensure() 和命令行脚本都要先看 failures() 为空才 mark()。
+         * 写失败却当成写成功的话，下一轮 failures() 读到空 → 完成标记打下去 →
+         * isMarked() 此后每次直接返回 → 那几行数据谁也不会再想起来。
+         * 记不下来就必须让调用方知道，宁可这轮报错重来。
+         */
+        $all = array_filter($all, static fn($entry): bool => !empty($entry));
+        $value = json_encode($all);
 
-            $exists = $main->fetchRow(
-                $main->select()->from('table.options')->where('name = ?', self::FAILED_OPTION)
-            );
+        $exists = $main->fetchRow(
+            $main->select()->from('table.options')->where('name = ?', self::FAILED_OPTION)
+        );
 
-            if (empty($exists)) {
-                $main->query($main->insert('table.options')
-                    ->rows(['name' => self::FAILED_OPTION, 'user' => 0, 'value' => $value]));
-            } else {
-                $main->query($main->update('table.options')
-                    ->rows(['value' => $value])
-                    ->where('name = ?', self::FAILED_OPTION));
-            }
-        } catch (\Throwable $e) {
+        if (empty($exists)) {
+            $main->query($main->insert('table.options')
+                ->rows(['name' => self::FAILED_OPTION, 'user' => 0, 'value' => $value]));
+        } else {
+            $main->query($main->update('table.options')
+                ->rows(['value' => $value])
+                ->where('name = ?', self::FAILED_OPTION));
         }
     }
 

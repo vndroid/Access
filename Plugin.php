@@ -486,13 +486,36 @@ class Plugin implements PluginInterface
          * 所以这一步以配置文件为准，没有配置文件时才用传进来的默认值。
          */
         if ($isInit) {
+            $fromFile = null;
             try {
                 $fromFile = Settings::load();
             } catch (\Throwable $e) {
-                $fromFile = null;
+                // 文件在但读不出来（YAML 写坏了、权限不对），下面回退到已有配置
             }
 
-            Edit::configPlugin('Access', $fromFile ?? $settings);
+            /*
+             * 回退顺序：配置文件 → **options 里已有的配置** → 表单默认值。
+             *
+             * 中间那一层是补上的。以前解析失败直接落到 $settings，而它是
+             * 表单控件的默认值，不是任何人填过的东西 —— 于是一个 YAML 语法错误
+             * 会把用户在后台填的 Redis 地址、独立统计库、IPinfo token 一次性抹成默认值。
+             * 更糟的是 activate() 那边的提示写的是「本次沿用已有配置」，
+             * 用户看到的和实际发生的正好相反：统计库被切回主库，
+             * 老队列还留在原来的 Redis 上没人认领。
+             */
+            $existing = null;
+            if ($fromFile === null) {
+                try {
+                    $existing = Migrate::readPluginOptions(Database::main());
+                    if (empty($existing)) {
+                        $existing = null;
+                    }
+                } catch (\Throwable $e) {
+                    $existing = null;
+                }
+            }
+
+            Edit::configPlugin('Access', $fromFile ?? $existing ?? $settings);
             return;
         }
 
@@ -546,14 +569,28 @@ class Plugin implements PluginInterface
 
         $drainNote = $adoptNote . $drain['note'];
 
-        Edit::configPlugin('Access', $settings);
-
-        # 配置保存后，按新的数据库设置建表并迁移历史数据
+        /*
+         * 顺序：先按**新配置**把目标库准备好，成功了再提交配置。
+         *
+         * 反过来（先保存再建表）的后果是留下一个半切换状态：配置已经指向新库，
+         * 而那个库里可能连表都没有 —— DDL 权限不足、库名写错、连得上但没有 CREATE 权限
+         * 都会走到这一步。此后前台每一次写入都在往一张不存在的表里插，
+         * 而 writeLogs() 的异常是被吞掉的，页面一切正常，统计悄无声息地停了。
+         * install() 只用传进来的 $settings，不读 options，所以可以安全地跑在提交之前。
+         *
+         * 这和上面 drainBeforeSwitch() 是同一个思路：先验证，再提交。
+         */
         try {
             $msg = self::install($settings);
         } catch (\Throwable $e) {
-            self::goBack(_t('插件设置已经保存，但初始化数据表失败：%s', $e->getMessage()), 'error');
+            self::goBack(
+                _t('统计数据库初始化失败，配置未保存（原配置继续生效）：%s', $e->getMessage()),
+                'error'
+            );
+            return;
         }
+
+        Edit::configPlugin('Access', $settings);
 
         # 顺带探测一次 Redis，避免在后台改完设置却毫无反馈
         $msg .= self::probeRedis($settings);
@@ -569,6 +606,22 @@ class Plugin implements PluginInterface
      */
     private static function schemaNotice(array $schema): string
     {
+        /*
+         * critical 表示 event_id 唯一索引不在，幂等保护失效。
+         * 这条要排在最前面，也不能只当成一句「升级未完成」：
+         * 插件照常能用，但写入队列已经自动降级为数据库直写（见 Core::writeLogs()），
+         * 用户得知道为什么突然变慢了，以及该去修什么。
+         */
+        if (!empty($schema['critical'])) {
+            return _t(
+                '（**统计表缺少 event_id 唯一索引**，写入队列已自动降级为数据库直写以免重复计数。'
+                . '常见原因是数据库账号没有建索引的权限，或存量数据里已存在重复的 event_id。%s）',
+                $schema['error'] === null
+                    ? ''
+                    : _t('原因：%s', mb_strimwidth(trim($schema['error']), 0, 60, '…', 'UTF-8'))
+            );
+        }
+
         if ($schema['error'] !== null) {
             return _t(
                 '（数据表结构升级未完成：%s，请修复后重新启用插件）',

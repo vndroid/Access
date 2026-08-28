@@ -3,6 +3,7 @@
 namespace TypechoPlugin\Access;
 
 use Typecho\Db;
+use Utils\Helper;
 
 if (!defined('__TYPECHO_ROOT_DIR__')) {
     exit;
@@ -89,6 +90,17 @@ final class Schema
      */
     private const OPTION = 'access_schema_version';
 
+    /**
+     * 「这个统计库缺幂等保护」的标记
+     *
+     * event_id 唯一索引是队列「至少一次投递」变成「恰好一次结果」的唯一依靠。
+     * 它建不起来（权限不足、存量数据里已有重复值）时，升级流程原来只是把原因
+     * 写进一句后台提示，插件照常启用、队列照常跑 —— 而队列一旦重放
+     * （进程被杀、processing 捡回、命令行重跑），同一条访问日志就会被重复计入统计，
+     * 且没有任何迹象。这个标记让写入侧能直接看到这件事并降级为数据库直写。
+     */
+    private const DEGRADED_OPTION = 'access_schema_degraded';
+
     /** 最多记住几个统计库的版本，避免反复换库时这一行无限变长 */
     private const MAX_TRACKED = 8;
 
@@ -104,6 +116,127 @@ final class Schema
      *         repaired 版本号已是最新、但实地校验发现缺失并补上的结构项
      */
     public static function ensure(Db $target, string $fingerprint, bool $justCreated, ?Db $main = null): array
+    {
+        $result = self::runEnsure($target, $fingerprint, $justCreated, $main);
+
+        /*
+         * 不管上面走的是哪条分支（跳过、升级、修复、失败），最后都实地确认一次
+         * 幂等保护到底在不在，并把结论记下来给写入侧看。
+         * 版本号说「升过了」不等于索引真的建起来了 —— 这正是当初加 gaps() 的理由，
+         * 这里只是把同一个教训延伸到「建不起来之后怎么办」。
+         */
+        $result['critical'] = false;
+        try {
+            $table = $target->getPrefix() . 'access';
+            $result['critical'] = !Database::uniqueIndexOn($target, $table, 'event_id');
+            self::markDegraded($main ?? Database::main(), $fingerprint, $result['critical']);
+        } catch (\Throwable $e) {
+            // 判定不了就不改标记，保持上一次的结论
+        }
+
+        return $result;
+    }
+
+    /**
+     * 这个统计库是不是缺幂等保护（缺 event_id 唯一索引）
+     *
+     * 写入侧每条日志都要问一次，所以按请求缓存，并优先走 Typecho 已经加载好的
+     * options（它启动时就把 user=0 的整张表读进内存了），读不到再退回直接查询。
+     *
+     * @param string $fingerprint
+     * @param Db|null $main
+     * @return bool
+     */
+    public static function isDegraded(string $fingerprint, ?Db $main = null): bool
+    {
+        if (array_key_exists($fingerprint, self::$degradedCache)) {
+            return self::$degradedCache[$fingerprint];
+        }
+
+        $value = null;
+        try {
+            $value = Helper::options()->{self::DEGRADED_OPTION} ?? null;
+        } catch (\Throwable $e) {
+            // 命令行下没有 Options，往下走直接查询
+        }
+
+        if ($value === null) {
+            try {
+                $row = ($main ?? Database::main())->fetchRow(
+                    ($main ?? Database::main())->select()->from('table.options')
+                        ->where('name = ?', self::DEGRADED_OPTION)
+                );
+                $value = $row['value'] ?? '';
+            } catch (\Throwable $e) {
+                /*
+                 * 读不出来就当**没有**降级。
+                 * 反过来（读不到就降级）会让一次主库抖动把所有站点的写入队列关掉，
+                 * 而缺索引的后果只是统计数字可能重复 —— 前者的代价大得多。
+                 */
+                return self::$degradedCache[$fingerprint] = false;
+            }
+        }
+
+        $all = json_decode((string)$value, true);
+        $degraded = is_array($all) && !empty($all[$fingerprint]);
+
+        return self::$degradedCache[$fingerprint] = $degraded;
+    }
+
+    /**
+     * 记下/清掉某个统计库的降级标记
+     *
+     * @param Db $main
+     * @param string $fingerprint
+     * @param bool $degraded
+     * @return void
+     */
+    private static function markDegraded(Db $main, string $fingerprint, bool $degraded): void
+    {
+        try {
+            $row = $main->fetchRow(
+                $main->select()->from('table.options')->where('name = ?', self::DEGRADED_OPTION)
+            );
+            $all = empty($row['value']) ? [] : (json_decode((string)$row['value'], true) ?: []);
+            if (!is_array($all)) {
+                $all = [];
+            }
+
+            if ($degraded) {
+                $all[$fingerprint] = 1;
+            } else {
+                unset($all[$fingerprint]);
+            }
+
+            $value = json_encode($all);
+            if (empty($row)) {
+                if ($degraded) {
+                    $main->query($main->insert('table.options')
+                        ->rows(['name' => self::DEGRADED_OPTION, 'user' => 0, 'value' => $value]));
+                }
+            } else {
+                $main->query($main->update('table.options')
+                    ->rows(['value' => $value])
+                    ->where('name = ?', self::DEGRADED_OPTION));
+            }
+
+            self::$degradedCache[$fingerprint] = $degraded;
+        } catch (\Throwable $e) {
+            // 记不下来不该挡住启用流程；下次保存设置还会再判一次
+        }
+    }
+
+    /** @var array<string,bool> 按请求缓存降级判定 */
+    private static array $degradedCache = [];
+
+    /**
+     * @param Db $target
+     * @param string $fingerprint
+     * @param bool $justCreated
+     * @param Db|null $main
+     * @return array
+     */
+    private static function runEnsure(Db $target, string $fingerprint, bool $justCreated, ?Db $main = null): array
     {
         $result = ['from' => null, 'to' => self::VERSION, 'applied' => [], 'repaired' => [], 'error' => null];
 

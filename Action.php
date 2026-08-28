@@ -6,6 +6,7 @@ use RuntimeException;
 use Typecho\Widget;
 use Widget\ActionInterface;
 use Widget\Options;
+use Widget\Security;
 
 if (!defined('__TYPECHO_ROOT_DIR__')) {
     exit;
@@ -76,7 +77,7 @@ class Action extends Widget implements ActionInterface
 
     public function ipGeo(): void
     {
-        $this->checkAuth();
+        $this->checkAuth(false);
         $ip = $this->request->get('ip');
 
         try {
@@ -143,7 +144,7 @@ class Action extends Widget implements ActionInterface
      */
     public function overview(): void
     {
-        $this->checkAuth();
+        $this->checkAuth(false);
         try {
             $section = (string)$this->request->get('section', '');
 
@@ -175,7 +176,7 @@ class Action extends Widget implements ActionInterface
      */
     public function logsParse(): void
     {
-        $this->checkAuth();
+        $this->checkAuth(false);
         try {
             $page   = (int)$this->request->get('page', 1);
             $type   = (int)$this->request->get('type', 1);
@@ -279,15 +280,73 @@ class Action extends Widget implements ActionInterface
     }
 
     /**
-     * 鉴权：非管理员直接返回 403 并终止
+     * 鉴权：非管理员、或没带上有效 token 的请求，直接返回 403 并终止
+     *
+     * 光有 isAdmin() 不够 —— 那只回答「你是不是管理员」，回答不了
+     * 「这次请求是不是你自己发起的」。删除日志和迁移都是写操作，
+     * 管理员在登录状态下访问任意一个第三方页面，页面里一个
+     * <img src="…/access/migrate.json"> 或一个自动提交的表单就能替他发出去。
+     *
+     * token 用 Typecho 自己的 Widget\Security 生成，值里含站点密钥、当前用户的
+     * authCode 和 uid，别人算不出来 —— CSRF 要的就是这一条。
+     *
+     * 但**不绑 referer**，而是绑一个固定作用域字符串。Security::protect() 绑的是
+     * referer，那在这里会坏两次：控制台用 history.pushState 切 Tab，渲染时算出的
+     * token 和切完 Tab 之后 XHR 带的 referer 对不上；而浏览器或站点的
+     * Referrer-Policy 一旦把 referer 剥掉，接口对那些用户直接全废。
+     * 固定作用域没有这两个问题，安全性质不变。
+     *
+     * 也不直接调 protect()：它失败时是 goBack() 跳转，对一个 JSON 接口来说
+     * 前端拿到的会是一段 HTML 而不是错误码。
+     *
+     * @param bool $write 写操作额外要求 POST；只读接口传 false
      */
-    protected function checkAuth(): void
+    /**
+     * 接口 token 的固定作用域
+     *
+     * 换个字面量就等于让所有已发出的页面上的 token 立即失效，别随手改。
+     */
+    private const TOKEN_SCOPE = 'plugin:access:api';
+
+    /**
+     * 生成本用户的接口 token，控制台渲染和接口校验共用这一处
+     *
+     * @return string
+     */
+    public static function token(): string
+    {
+        return Security::alloc()->getToken(self::TOKEN_SCOPE);
+    }
+
+    protected function checkAuth(bool $write = true): void
     {
         if (!$this->getAccess()->isAdmin()) {
             $this->response->setStatus(403);
             $this->response->throwJson([
                 'code' => 403,
                 'data' => 'Access Denied',
+            ]);
+        }
+
+        /*
+         * 写操作必须是 POST。CSRF 里最省事的那条路（<img>、<script>、跨站链接）
+         * 只能发出 GET，挡掉 GET 就把它们一并挡掉了，token 只是第二道。
+         * migrate 接口以前就是 GET 写操作。
+         */
+        if ($write && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'POST') {
+            $this->response->setStatus(405);
+            $this->response->throwJson([
+                'code' => 405,
+                'data' => 'Method Not Allowed: write endpoints require POST',
+            ]);
+        }
+
+        $token = (string)$this->request->get('_', '');
+        if ($token === '' || !hash_equals(self::token(), $token)) {
+            $this->response->setStatus(403);
+            $this->response->throwJson([
+                'code' => 403,
+                'data' => 'Invalid or missing token',
             ]);
         }
     }

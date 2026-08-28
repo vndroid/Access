@@ -111,17 +111,24 @@ try {
         exit(0);
     }
 
-    $total = Migrate::sourceCount($main);
-    $maxSourceId = Migrate::sourceMaxId($main);
-    $migrated = Migrate::migratedCount($target, $maxSourceId);
-    $pending = max(0, $total - $migrated);
+    $fingerprint = Migrate::fingerprint($dbSettings);
+
+    try {
+        $total = Migrate::sourceCountStrict($main);
+        $maxSourceId = Migrate::sourceMaxIdStrict($main);
+        # 进度按断点算，不按目标表行数算：目标库自己产生的新日志不是「已迁移的历史数据」
+        $checkpoint = Migrate::resumeFrom($main, $target, $fingerprint, $maxSourceId);
+        $pending = Migrate::pendingCount($main, $checkpoint);
+    } catch (\Throwable $e) {
+        out('读取源表失败：' . $e->getMessage());
+        exit(1);
+    }
+    $migrated = max(0, $total - $pending);
 
     out('源  ' . $main->getAdapterName() . '  ' . $main->getPrefix() . 'access  共 ' . number_format($total) . ' 行');
-    out('目标 ' . $target->getAdapterName() . '  ' . $targetTable
-        . '  已有 ' . number_format($migrated) . ' 行（迁移区间内）');
+    out('目标 ' . $target->getAdapterName() . '  ' . $targetTable);
+    out('断点 id > ' . number_format($checkpoint) . '，已扫过 ' . number_format($migrated) . ' 行');
     out('待迁移 ' . number_format($pending) . ' 行');
-
-    $fingerprint = Migrate::fingerprint($dbSettings);
 
     if (!empty($argvOptions['forget-failed'])) {
         $forgotten = count(Migrate::failures($main, $fingerprint));
@@ -160,10 +167,28 @@ try {
     }
 
     if ($pending === 0) {
+        /*
+         * 扫到头了，但这不等于「每一行都落库了」。
+         *
+         * 断点是「扫到哪儿」，失败行落在断点**之后面**（断点照常推进，失败行单独记账），
+         * 所以 pending === 0 与「有失败行」完全可以同时成立。
+         * 以前这里见到 pending === 0 就把失败记录清掉再打完成标记，理由是
+         * 「行数对上了说明那几行是人工补进去的」—— 那个推理建立在旧的
+         * 「目标表行数」口径上，换成断点口径之后不成立了，照做就是把没迁过去的
+         * 数据一笔勾销。现在改成：先真的补写一次，补不上就拒绝标记。
+         */
         if (!empty($known)) {
-            # 行数对上了但失败记录还在，说明那几行是人工补进去的，顺手把记录清掉
-            Migrate::clearFailures($main, $fingerprint);
+            $columns = Migrate::usableColumnsFor($main);
+            $retry = Migrate::retryFailures($main, $target, $fingerprint, $columns);
+            out(sprintf('补写此前失败的 %s 行：成功 %s 行，仍剩 %s 行。',
+                number_format(count($known)), number_format($retry['written']), number_format($retry['remaining'])));
+
+            if ($retry['remaining'] > 0) {
+                out('仍有行写不进目标库，未标记完成。修复后重新执行，或用 --forget-failed 明确放弃它们。');
+                exit(2);
+            }
         }
+
         Migrate::mark($main, $fingerprint);
         out('没有需要迁移的数据，已标记为完成。');
         exit(0);

@@ -1,5 +1,58 @@
 v3.2.3
 2026年08月28日
+    - **修复大表推迟迁移时，目标库的新日志会吃掉源表数据**。抬高目标表自增起点这一步
+      原来只在 run() 里做，而数据量超过 AUTO_LIMIT 时 ensure() 走的是 Skipped 分支、
+      根本到不了 run()。此时配置已保存，前台立刻开始往目标库写新日志、id 从 1 起，
+      正落在迁移区间里：旧的断点推导（目标表 MAX(id)）直接跳到这些新日志的最大 id，
+      源表前面一整截被静默跳过，migratedCount() 还把它们算成「已迁移」，连 pending 都是错的。
+      现在 reserveIdRange() 排在 Skipped 判断之前，目标库新产生的日志一律落在源表最大 id 之上
+    - **迁移断点改为自己存**（主库 options 的 access_migrate_checkpoint，按目标库指纹分组），
+      不再从目标表 MAX(id) 推导。除上一条外，旧推导还有第二个错：写失败的行在目标表里是空洞，
+      MAX(id) 天然跳过它们，于是失败行永远不会被重读。没有断点时（老版本升上来）
+      仍退回旧推导一次，之后就存下来
+    - **失败行现在真的会被重试**。每轮迁移开工前先补写一次（retryFailures()），
+      失败记录从「id 列表」变成「id => 已尝试次数」，试满 MAX_FAILED_ATTEMPTS(3) 次后
+      不再自动补写但记录保留，完成标记照样打不下去。源行已被删掉的从清单里摘掉，
+      否则它永远补不回来、也就永远挡着完成标记。断点照常推进到批尾，
+      失败行由清单单独负责 —— 让断点停在失败行之前会把整个迁移永久卡死在同一个位置
+    - Migrate::writeFailed() 不再吞异常。这一行是唯一挡住完成标记的东西：
+      写失败却当成写成功，下一轮 failures() 读到空就 mark() 下去，那几行数据谁也不会再想起来
+    - **修复源库查询失败被当成「没有历史数据」并标记完成**。tableExists / sourceCount /
+      sourceMaxId 都把「查询失败」和「确实为空」答成同一个值（false / 0），而 ensure() 里
+      每个这样的分支出口都是 mark()，run() 里则是 done=true —— 主库连接抖一下，
+      整张源表就被永久判定为没有历史数据。新增 tableExistsStrict / sourceCountStrict /
+      sourceMaxIdStrict，迁移路径一律用它们；容错版保留给展示类调用
+    - 进度改按断点算（pendingCount：源表里 id > 断点的行数），不再按目标表行数算 ——
+      目标库自己产生的新日志不是「已迁移的历史数据」。命令行脚本里
+      「pending 为 0 就清掉失败记录并标记完成」也一并改掉：换成断点口径之后，
+      pending 为 0 与「有失败行」完全可以同时成立，照旧做就是把没迁过去的数据一笔勾销。
+      现在先真的补写一次，补不上就拒绝标记并以 2 退出
+    - **修复缺 event_id 唯一索引时队列照常运行**。这个索引是「至少一次投递」变成
+      「恰好一次结果」的唯一依靠，它建不起来（无建索引权限、存量数据已有重复值）时，
+      原来只在后台留一句黄字，插件照常启用、队列照常跑 —— 进程被杀后 processing 重放、
+      或命令行重跑一次，同一条访问日志就被重复计入统计，且毫无迹象。
+      现在 Schema::ensure() 实地复核并返回 critical，同时把结论写进 options
+      （access_schema_degraded，按指纹分组）；Core 写入前检查，缺索引就强制走数据库直写。
+      修好之后标记自动清掉、恢复走队列。直写慢是看得见的，统计悄悄变错不是
+    - **修复保存设置时先提交配置、后建表，失败会留下半切换状态**。DDL 权限不足、
+      库名写错时，配置已经指向新库而那个库里连表都没有，此后每次写入都在往不存在的表里插，
+      而 writeLogs() 的异常是被吞掉的 —— 页面一切正常，统计无声停摆。
+      现在先用新配置建表并跑完 Schema::ensure()，成功了才提交配置，失败则原配置继续生效
+    - **修复 config/current.yaml 解析失败会把已有配置覆盖成表单默认值**。
+      启用插件时 Typecho 会再调一次 configHandle($isInit=true)，传进来的是控件默认值；
+      原来文件读不出来就直接用它，于是一个 YAML 语法错误就把后台填好的 Redis 地址、
+      独立统计库、IPinfo token 全抹掉，而启用提示写的却是「本次沿用已有配置」。
+      现在回退顺序是：配置文件 → options 里已有的配置 → 表单默认值
+    - **接口补上 CSRF 防护**。原来只有 isAdmin()，那只回答「你是不是管理员」，
+      回答不了「这次请求是不是你自己发起的」；migrate 还是个 GET 写操作，
+      管理员在登录状态下访问任意第三方页面，一个 <img src=".../access/migrate.json"> 就能触发。
+      现在写接口（deleteLogs / migrate）强制 POST 否则 405，五个接口一律校验 token
+      （hash_equals 定时比较）。token 用 Typecho 的 Widget\Security 生成，含站点密钥、
+      用户 authCode 与 uid，但**绑固定作用域而不是 referer**：控制台用 history.pushState 切 Tab，
+      绑 referer 的话切一次就全失效，而 Referrer-Policy 剥掉 referer 时接口会对那些用户直接全废
+    - 新增 tools/selftest.php 与 tools/selftest-migrate.php，可在真实 PostgreSQL + Redis 上
+      验证上述两类故障路径。两者都强制隔离（拒绝生产前缀 / 拒绝 redis-db 0 /
+      在一次性库里自建源库与目标库），结束自动清理
     - **修复写库故障被误判成脏数据后整批倒进死信**。判定原来靠 Migrate::alive()：
       一条都没写进去时探一次活，活着就认定「这批是脏数据」全部转死信。可 alive() 走的是
       SELECT —— 实测 PostgreSQL 16 下，库处于只读事务（备库 / default_transaction_read_only）、

@@ -11,6 +11,7 @@ include 'header.php';
 include 'menu.php';
 
 use Typecho\Request;
+use TypechoPlugin\Access\Action as AccessAction;
 use TypechoPlugin\Access\Core;
 use TypechoPlugin\Access\Plugin as AccessPlugin;
 use Utils\Helper;
@@ -258,6 +259,8 @@ include 'table-js.php';
     let ipApiUrl       = '<?php echo rtrim(Helper::options()->index, '/') . '/access/geo.json'; ?>';
     let deleteApiUrl   = '<?php echo rtrim(Helper::options()->index, '/') . '/access/logs/delete.json'; ?>';
     let migrateApiUrl  = '<?php echo rtrim(Helper::options()->index, '/') . '/access/migrate.json'; ?>';
+    /* 接口 token：接口只认它，不认 referer（Tab 切换会用 pushState 改 URL） */
+    let apiToken       = '<?php echo AccessAction::token(); ?>';
     let adminUrl       = '<?php echo rtrim(Helper::options()->adminUrl, '/'); ?>';
     let panelName      = '<?php echo AccessPlugin::$panel; ?>';
     let initAction     = '<?php echo $initAction; ?>';
@@ -490,7 +493,7 @@ include 'table-js.php';
     function requestSection(name, token, attempt, done) {
         $.ajax({
             url: overviewApiUrl, method: 'get', dataType: 'json', timeout: 120000,
-            data: { section: name, seconds: 8 },
+            data: { section: name, seconds: 8, _: apiToken },
             success: function(res) {
                 if (token !== overviewToken) return;          // 已被刷新作废
                 if (!res || res.code !== 0) {
@@ -554,7 +557,7 @@ include 'table-js.php';
         syncFilterUI(state);
 
         $.ajax({
-            url: logsApiUrl, method: 'get', dataType: 'json', data: params,
+            url: logsApiUrl, method: 'get', dataType: 'json', data: $.extend({ _: apiToken }, params),
             success: function(res) {
                 if (res.code !== 0) {
                     $('#logs-table-body').html('<tr><td colspan="6">' + escapeHtml(describeError(res, null)) + '</td></tr>');
@@ -663,7 +666,7 @@ include 'table-js.php';
             swal('定位查询中...', '正在查询...', 'info');
             $.ajax({
                 url: ipApiUrl, method: 'get', dataType: 'json',
-                data: { ip: $(this).data('ip') },
+                data: { ip: $(this).data('ip'), _: apiToken },
                 success: function(data) {
                     if (data.code === 0) {
                         let geoData = data.i18n && data.i18n.country !== null ? data.i18n : data.data;
@@ -711,7 +714,7 @@ include 'table-js.php';
     function migrateStep() {
         if (!migrateRunning) return;
         $.ajax({
-            url: migrateApiUrl, dataType: 'json', timeout: 120000,
+            url: migrateApiUrl, method: 'post', dataType: 'json', timeout: 120000, data: { _: apiToken },
             success: function(res) {
                 if (!res || res.code !== 0) {
                     migrateFinish('迁移出错：' + ((res && res.data) || '未知错误') + '，可稍后重试或改用命令行脚本。', 'error');
@@ -749,7 +752,7 @@ include 'table-js.php';
 
     function migrateProbe() {
         $.ajax({
-            url: migrateApiUrl, dataType: 'json', data: { probe: 1 },
+            url: migrateApiUrl, method: 'post', dataType: 'json', data: { probe: 1, _: apiToken },
             success: function(res) {
                 if (!res || res.code !== 0 || !res.data || !res.data.external) return;
                 if (res.data.done || res.data.pending <= 0) return;
@@ -863,7 +866,8 @@ include 'table-js.php';
                 });
                 if (!ids.length) return swal('错误', '并没有勾选任何内容', 'warning');
                 $.ajax({
-                    url: deleteApiUrl, method: 'post', dataType: 'json',
+                    url: deleteApiUrl + '?_=' + encodeURIComponent(apiToken),
+                    method: 'post', dataType: 'json',
                     contentType: 'application/json', data: JSON.stringify(ids),
                     success: function(data) {
                         if (data.code === 0) {
