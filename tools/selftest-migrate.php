@@ -41,8 +41,11 @@ if (!is_string($root) || !file_exists($root . '/config.inc.php')) {
     exit(1);
 }
 
-define('__TYPECHO_ROOT_DIR__', $root);
 require_once $root . '/config.inc.php';
+if (!defined('__TYPECHO_ROOT_DIR__')) {
+    fwrite(STDERR, "config.inc.php 未定义 __TYPECHO_ROOT_DIR__。\n");
+    exit(1);
+}
 
 use Typecho\Db;
 use TypechoPlugin\Access\Database;
