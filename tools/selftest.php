@@ -225,7 +225,26 @@ chk($r->lLen(Queue::key()) === 2, '主队列 2 条原封不动');
 $r->del(Queue::processingKey());
 
 out();
-out('=== 6. SQLSTATE 归类 ===');
+out('=== 6. 连接层持续失败（fatal 路径）不能倒数据，但也不能永久堵死 ===');
+resetAll($r, $db, $table);
+for ($i = 0; $i < 4; $i++) { $r->rPush(Queue::key(), row()); }
+
+# 指向一个几乎不可能有服务在听的端口，让 insertBatchDetailed 在建语句之前就失败
+$broken = connect(['pg-host' => '127.0.0.1', 'pg-port' => 1, 'pg-user' => $o['pg-user'] ?? 'postgres',
+                   'pg-pass' => $o['pg-pass'] ?? ''], $pgDb, $prefix);
+$res = Queue::flush($r, $broken, 100);
+chk($res['stopped'] === 'db', "stopped='db'（实得 {$res['stopped']}）");
+chk($r->lLen(Queue::deadKey()) === 0, '死信 0 条 —— 连不上库不等于数据有问题');
+chk($r->lLen(Queue::processingKey()) === 4, '4 条完整保留在 processing 等重试');
+
+$r->set(Cache::key('queue:stuck_since'), time() - Queue::STUCK_SECONDS - 1);
+Queue::flush($r, $broken, 100);
+chk($r->lLen(Queue::processingKey()) === 0, '卡满上限后放行，processing 清空 —— 否则主队列涨满会从队首丢数据');
+chk(reasons($r) === array_fill(0, 4, 'db-environment'),
+    '4 条按环境问题转入死信（实得 ' . implode(',', array_unique(reasons($r))) . '）');
+
+out();
+out('=== 7. SQLSTATE 归类 ===');
 $cases = [
     ['23505', 'Data'], ['22001', 'Data'], ['23502', 'Data'], ['22P02', 'Data'],
     ['23514', 'Data'], ['22003', 'Data'], ['23000', 'Data'],

@@ -28,7 +28,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.2.5
+ * @version 3.2.6
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
@@ -81,6 +81,26 @@ class Plugin implements PluginInterface
         # 把设置数组直接交给 install()——Options 组件在一次请求里只读一遍插件配置，
         # 就算先写进 options 表它也看不到，建表仍会用旧的数据库设置。
         [$applied, $configNote] = self::readFileConfig();
+
+        /*
+         * 配置文件会换掉队列归属时，先用**旧配置**把积压刷干净。
+         *
+         * 保存设置那条路早就有这道闸门（drainBeforeSwitch），启用这条路一直没有：
+         * 「禁用时队列没刷干净所以原样保留 → 改了 current.yaml 指向别的 Redis / 统计库
+         * → 启用」这一串走下来，旧队列就留在原地没人认领了。
+         * 这里不像保存设置那样直接拒绝 —— 启用被拒会让插件装不上，代价太大；
+         * 改为尽力刷一次，刷不干净就把话说清楚放进启用提示里。
+         */
+        if ($applied !== null) {
+            try {
+                $drain = self::drainBeforeSwitch($applied);
+                if ($drain['note'] !== '') {
+                    $configNote .= $drain['note'];
+                }
+            } catch (\Throwable $e) {
+                // 刷不了不该挡住启用；下面 install() 之后还会探测一次 Redis
+            }
+        }
 
         $msg = self::install($applied);
 
@@ -613,12 +633,28 @@ class Plugin implements PluginInterface
          * 用户得知道为什么突然变慢了，以及该去修什么。
          */
         if (!empty($schema['critical'])) {
+            $why = $schema['error'] === null
+                ? ''
+                : _t('原因：%s', mb_strimwidth(trim($schema['error']), 0, 60, '…', 'UTF-8'));
+
+            /*
+             * 降级标记没写进主库时，写入侧读到的仍然是「没降级」，队列照常在跑。
+             * 这时候还说「已自动降级为直写」就是在骗人 —— 用户以为安全了，
+             * 而重复计数还在发生。两种情况必须给不同的话。
+             */
+            if (empty($schema['criticalRecorded'])) {
+                return _t(
+                    '（**统计表缺少 event_id 唯一索引，而降级标记未能写入主库**，'
+                    . '写入队列可能仍在运行，队列重放会造成重复计数。'
+                    . '请修复后重新保存一次设置；在此之前可以先在插件设置里关掉「写入缓冲」。%s）',
+                    $why
+                );
+            }
+
             return _t(
                 '（**统计表缺少 event_id 唯一索引**，写入队列已自动降级为数据库直写以免重复计数。'
                 . '常见原因是数据库账号没有建索引的权限，或存量数据里已存在重复的 event_id。%s）',
-                $schema['error'] === null
-                    ? ''
-                    : _t('原因：%s', mb_strimwidth(trim($schema['error']), 0, 60, '…', 'UTF-8'))
+                $why
             );
         }
 

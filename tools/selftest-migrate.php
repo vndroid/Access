@@ -58,14 +58,14 @@ if ($pgDb === '') {
 const SRC = 'stsrc_';
 const TGT = 'sttgt_';
 
-function conn(array $o, string $db, string $prefix, ?string $user = null): Db
+function conn(array $o, string $db, string $prefix, ?string $user = null, ?string $password = null): Db
 {
     $c = new Db('Pdo_Pgsql', $prefix);
     $c->addServer([
         'host'     => $o['pg-host'] ?? '127.0.0.1',
         'port'     => (int)($o['pg-port'] ?? 5432),
         'user'     => $user ?? ($o['pg-user'] ?? 'postgres'),
-        'password' => $o['pg-pass'] ?? '',
+        'password' => $password ?? ($o['pg-pass'] ?? ''),
         'database' => $db,
         'charset'  => 'utf8',
     ], Db::READ | Db::WRITE);
@@ -132,7 +132,7 @@ function seed(Db $src, int $n): void
     $src->query('DELETE FROM ' . SRC . 'access', Db::WRITE);
     $src->query('ALTER SEQUENCE ' . SRC . 'access_id_seq RESTART WITH 1', Db::WRITE);
     $src->query('INSERT INTO ' . SRC . 'access (ua,browser_id,os_id,url,path,ip,time,content_id,meta_id,robot,event_id)
-                 SELECT \'UA\',\'C\',\'M\',\'/x\',\'/x\',\'1\', extract(epoch from now())::int, 1, 0, 0,
+                 SELECT \'SRC\',\'C\',\'M\',\'/x\',\'/x\',\'1\', extract(epoch from now())::int, 1, 0, 0,
                         lpad(to_hex(g),32,\'0\') FROM generate_series(1,' . $n . ') g', Db::WRITE);
 }
 function tgtRows(Db $tgt, string $where = '1=1'): int
@@ -164,7 +164,7 @@ $minNew = (int)$tgt->fetchAll($tgt->query('SELECT MIN(id) m FROM ' . TGT . "acce
 chk($minNew > Migrate::AUTO_LIMIT, "迁移期间产生的新日志 id 从 {$minNew} 起，不与迁移区间重叠");
 
 $r = Migrate::run($src, $tgt, ['fingerprint' => $fp, 'batchSize' => 5000]);
-chk(tgtRows($tgt, "ua='UA'") === Migrate::AUTO_LIMIT + 1, '源表数据一行不少地迁到位');
+chk(tgtRows($tgt, "ua='SRC'") === Migrate::AUTO_LIMIT + 1, '源表数据一行不少地迁到位');
 chk($r['done'] === true, 'done=true');
 chk(Migrate::checkpoint($src, $fp) === Migrate::AUTO_LIMIT + 1, '断点已存进主库 options');
 
@@ -179,9 +179,10 @@ seed($src, 10);
  * 建角色要 CREATEROLE/超级用户；权限不够就明确跳过，不假装通过。
  */
 $roleOk = true;
+$lowPassword = bin2hex(random_bytes(16));
 try {
     $src->query("DROP ROLE IF EXISTS access_selftest_low", Db::WRITE);
-    $src->query("CREATE ROLE access_selftest_low LOGIN", Db::WRITE);
+    $src->query("CREATE ROLE access_selftest_low LOGIN PASSWORD '{$lowPassword}'", Db::WRITE);
     $src->query('GRANT USAGE ON SCHEMA public TO access_selftest_low', Db::WRITE);
     $src->query('GRANT ALL ON ' . SRC . 'options TO access_selftest_low', Db::WRITE);
     $src->query('REVOKE ALL ON ' . SRC . 'access FROM access_selftest_low', Db::WRITE);
@@ -191,7 +192,7 @@ try {
 }
 
 if ($roleOk) {
-    $low = conn($o, $pgDb, SRC, 'access_selftest_low');
+    $low = conn($o, $pgDb, SRC, 'access_selftest_low', $lowPassword);
     Db::set($low);
     $res = Migrate::ensure($tgt, $settings, microtime(true) + 5);
     chk($res['status'] === MigrateStatus::None, 'status=None（实得 ' . $res['status']->name . '）');
@@ -225,7 +226,28 @@ chk(tgtRows($tgt) === 10, '障碍排除后补写成功，10 行齐了');
 chk(Migrate::failures($src, $fp) === [], '失败记录已清空');
 chk($r['done'] === true, 'done=true，这时才允许打完成标记');
 
-echo "\n=== 4. 一直失败的行不会让迁移永远重试下去 ===\n";
+echo "\n=== 4. 目标库已有自己的日志时必须拒绝迁移（不能静默丢源数据）===\n";
+clearState($src, $tgt);
+seed($src, 50);
+# 旧版本走 Skipped 分支时就是这个形态：配置已切换、迁移被推迟、前台从 id=1 开始往目标库写
+$tgt->query('INSERT INTO ' . TGT . 'access (ua,browser_id,os_id,url,path,ip,time,content_id,meta_id,robot,event_id)
+             SELECT \'NATIVE\',\'C\',\'M\',\'/n\',\'/n\',\'2\',9000+g,9,0,0,
+                    lpad(to_hex(90000+g),32,\'0\') FROM generate_series(1,20) g', Db::WRITE);
+
+$r = Migrate::run($src, $tgt, ['fingerprint' => $fp, 'batchSize' => 20]);
+chk($r['done'] === false, '拒绝执行，done=false');
+chk($r['error'] !== null && str_contains((string)$r['error'], '静默丢弃'),
+    '报错点名主键冲突：' . mb_strimwidth((string)$r['error'], 0, 44, '…'));
+chk(tgtRows($tgt, "ua='SRC'") === 0, '一行都没迁 —— 拒绝执行而不是迁一半');
+chk(Migrate::checkpoint($src, $fp) === null, '断点未写入');
+$e = Migrate::ensure($tgt, $settings, microtime(true) + 10);
+chk(!Migrate::isMarked($src, $fp), 'ensure 同样拦下，没有打完成标记');
+
+$tgt->query('DELETE FROM ' . TGT . "access WHERE ua='NATIVE'", Db::WRITE);
+$r = Migrate::run($src, $tgt, ['fingerprint' => $fp, 'batchSize' => 20]);
+chk(tgtRows($tgt, "ua='SRC'") === 50 && $r['done'] === true, '清掉外来行之后 50 行一行不少地迁完');
+
+echo "\n=== 5. 一直失败的行不会让迁移永远重试下去 ===\n";
 clearState($src, $tgt);
 seed($src, 5);
 $tgt->query('ALTER TABLE ' . TGT . 'access ADD CONSTRAINT st_poison CHECK (content_id <> 7)', Db::WRITE);

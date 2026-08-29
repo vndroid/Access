@@ -126,12 +126,24 @@ final class Schema
          * 这里只是把同一个教训延伸到「建不起来之后怎么办」。
          */
         $result['critical'] = false;
+        /*
+         * criticalRecorded：降级标记有没有真的写进主库。
+         * 写不进去的时候，Core::schemaDegraded() 读到的还是「没降级」，队列照常在跑 ——
+         * 而后台提示如果照旧说「已自动降级为直写」，那就是在骗人：用户以为已经安全了，
+         * 实际上重复计数还在发生。所以这个结果必须带出去，让提示说实话。
+         */
+        $result['criticalRecorded'] = true;
         try {
             $table = $target->getPrefix() . 'access';
             $result['critical'] = !Database::uniqueIndexOn($target, $table, 'event_id');
-            self::markDegraded($main ?? Database::main(), $fingerprint, $result['critical']);
+            $result['criticalRecorded'] = self::markDegraded(
+                $main ?? Database::main(),
+                $fingerprint,
+                $result['critical']
+            );
         } catch (\Throwable $e) {
             // 判定不了就不改标记，保持上一次的结论
+            $result['criticalRecorded'] = false;
         }
 
         return $result;
@@ -189,9 +201,9 @@ final class Schema
      * @param Db $main
      * @param string $fingerprint
      * @param bool $degraded
-     * @return void
+     * @return bool 是否确实写进了主库；false 时调用方**不能**对外宣称已经降级
      */
-    private static function markDegraded(Db $main, string $fingerprint, bool $degraded): void
+    private static function markDegraded(Db $main, string $fingerprint, bool $degraded): bool
     {
         try {
             $row = $main->fetchRow(
@@ -221,8 +233,13 @@ final class Schema
             }
 
             self::$degradedCache[$fingerprint] = $degraded;
+            return true;
         } catch (\Throwable $e) {
-            // 记不下来不该挡住启用流程；下次保存设置还会再判一次
+            /*
+             * 记不下来不该挡住启用流程（下次保存设置还会再判一次），
+             * 但必须如实回报 —— 提示文案要靠它决定说什么。
+             */
+            return false;
         }
     }
 

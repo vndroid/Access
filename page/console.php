@@ -729,12 +729,23 @@ include 'table-js.php';
                 }
                 /* 有行写不进目标库、这一轮又没推进任何进度：再请求下去只是原地打转 */
                 if (res.data.blocked) {
+                    let tail = '常见原因是这几行数据超出目标表的列宽或类型限制。'
+                             + '请检查目标表结构后重试，或改用命令行脚本查看详细报错。';
+                    /* 都试满次数了：后台再点也不会有任何变化，得说清楚下一步 */
+                    if (res.data.exhausted) {
+                        tail = '这些行已经重试到上限，后台不会再自动补写。'
+                             + '修好数据库那边的问题之后，在服务器上执行 '
+                             + 'php usr/plugins/Access/tools/migrate.php --retry-failed --yes 重新补写；'
+                             + '确认放弃它们则用 --forget-failed。';
+                        if (res.data.failed_ids && res.data.failed_ids.length) {
+                            tail += '涉及的源表 id：' + res.data.failed_ids.join(', ')
+                                  + (res.data.failed > res.data.failed_ids.length ? ' …' : '') + '。';
+                        }
+                    }
                     migrateFinish(
                         res.data.reason
-                            ? '迁移已停下：' + res.data.reason + '。'
-                            : '有 ' + formatNumber(res.data.failed || 0) + ' 行写不进统计数据库，迁移已停下。'
-                              + '常见原因是这几行数据超出目标表的列宽或类型限制。'
-                              + '请检查目标表结构后重试，或改用命令行脚本查看详细报错。',
+                            ? '迁移已停下：' + res.data.reason + '。' + (res.data.exhausted ? tail : '')
+                            : '有 ' + formatNumber(res.data.failed || 0) + ' 行写不进统计数据库，迁移已停下。' + tail,
                         'error'
                     );
                     return;

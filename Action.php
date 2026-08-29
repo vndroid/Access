@@ -233,7 +233,20 @@ class Action extends Widget implements ActionInterface
                 $moved = 0;
                 $runError = null;
 
-                if (!$status['marked'] && $status['pending'] > 0 && !$this->request->get('probe')) {
+                /*
+                 * 条件里必须带上「还有失败行」这一项。
+                 *
+                 * 断点扫到头之后 pending 就是 0，而失败行是单独记账的 —— 原来只看
+                 * pending > 0，这时就再也不调 run() 了，而每轮 run() 开头的
+                 * retryFailures() 正是补写这些行的唯一入口。结果是接口一直回 blocked，
+                 * 哪怕数据库那边的障碍早就排除了，前端点多少次都没用。
+                 */
+                $pendingFailures = Migrate::failures($main, $fingerprint);
+                $shouldRun = !$status['marked']
+                    && ($status['pending'] > 0 || !empty($pendingFailures))
+                    && !$this->request->get('probe');
+
+                if ($shouldRun) {
                     $seconds = (int)$this->request->get('seconds', 3);
                     $seconds = max(1, min($seconds, 10));
 
@@ -248,6 +261,7 @@ class Action extends Widget implements ActionInterface
 
                 # 有行迁不过去就不算完成：pending 是按行数算的，它永远到不了 0
                 $stuck = Migrate::failures($main, $fingerprint);
+                $attempts = Migrate::failureAttempts($main, $fingerprint);
                 $done = $status['marked'] || ($status['pending'] === 0 && empty($stuck));
                 if ($done) {
                     Migrate::mark($main, $fingerprint);
@@ -268,6 +282,13 @@ class Action extends Widget implements ActionInterface
                      */
                     'blocked' => !$done && $moved === 0 && (!empty($stuck) || $runError !== null),
                     'reason' => $runError,
+                    /*
+                     * 失败行都试满次数之后，后台再点也不会有任何变化 ——
+                     * 得告诉用户下一步该干什么，而不是让他对着一个不动的进度条点下去。
+                     */
+                    'exhausted' => !empty($attempts)
+                        && count(array_filter($attempts, static fn(int $n): bool => $n < Migrate::MAX_FAILED_ATTEMPTS)) === 0,
+                    'failed_ids' => array_slice($stuck, 0, 20),
                 ];
             }
 

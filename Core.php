@@ -1563,6 +1563,17 @@ LUA;
         try {
             $this->db->query($this->db->insert('table.access')->rows($rows));
         } catch (\Throwable $e) {
+            /*
+             * 异常仍然不能往外抛 —— 这条路跑在页面渲染里，统计写不进去不该让访客看到白屏。
+             * 但也不能像原来那样完全无声：缺 event_id 唯一索引时队列会被强制降级为直写
+             * （见 writeLogs() 上面的说明），此时**直写是唯一的写入路径**，
+             * 它一直失败而没有任何痕迹的话，表现就是「统计突然不涨了」，无从查起。
+             * 至少写一条服务器错误日志，让 tail 一眼能看见。
+             */
+            error_log(sprintf(
+                '[Access] 直写统计表失败（本次访问未被记录）：%s',
+                $e->getMessage()
+            ));
         }
     }
 

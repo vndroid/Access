@@ -93,9 +93,27 @@ final class Settings
             throw new \RuntimeException(_t('配置文件 %s 读取失败', $path));
         }
 
-        $parsed = self::parse($raw);
+        $issues = [];
+        $parsed = self::parse($raw, $issues);
         if ($parsed === null) {
             throw new \RuntimeException(_t('配置文件 %s 解析失败，请检查 YAML 格式', $path));
+        }
+
+        /*
+         * 有认不出来的行就整份拒绝，而不是「能读几项算几项」。
+         *
+         * 部分加载是最糟的一种：读进去的项生效了，写坏的那项悄悄用默认值，
+         * 而调用方看到的是「加载成功」。宁可让启用时报一句明确的错 ——
+         * 调用方（Plugin::configHandle）收到异常会回退到 options 里已有的配置，
+         * 那比回退成表单默认值安全得多。
+         */
+        if (!empty($issues)) {
+            throw new \RuntimeException(_t(
+                '配置文件 %s 有 %d 处无法解析，为避免只加载一半，本次整份不采用：%s',
+                $path,
+                count($issues),
+                implode('；', array_slice($issues, 0, 5)) . (count($issues) > 5 ? ' …' : '')
+            ));
         }
 
         # 只认识 DEFAULTS 里的键，其余忽略；没写的项用默认值
@@ -194,8 +212,10 @@ final class Settings
      * @param string $raw
      * @return array|null 解析不出任何键值对时返回 null
      */
-    public static function parse(string $raw): ?array
+    public static function parse(string $raw, array &$issues = []): ?array
     {
+        $issues = [];
+
         # 装了 yaml 扩展就用它，对格式更宽容；结果再走一遍同样的归一化
         if (function_exists('yaml_parse')) {
             $doc = @yaml_parse($raw);
@@ -221,14 +241,25 @@ final class Settings
         $result = [];
         $section = null;      // 当前顶层段名，null 表示还没遇到段
         $seenSection = false;
+        $lineNo = 0;
 
         foreach (explode("\n", $raw) as $line) {
+            $lineNo++;
             $line = self::stripComment($line);
             if (trim($line) === '' || preg_match('/^\s*(---|\.\.\.)\s*$/', $line)) {
                 continue;
             }
 
+            /*
+             * 认不出来的行**要记下来**，不能像原来那样一个 continue 了事。
+             *
+             * 空行、注释、文档标记都在上面滤掉了，走到这儿还匹配不上的就是真的写坏了。
+             * 静默跳过的后果是：那一项悄悄回退成默认值，而文件里其余项照常生效 ——
+             * 用户改了统计库地址却写错一个字符，看到的是「配置已加载」，
+             * 实际上统计写回了主库，没有任何提示。
+             */
             if (!preg_match('/^(\s*)([A-Za-z_][A-Za-z0-9_.\-]*)\s*:\s*(.*)$/', $line, $m)) {
+                $issues[] = sprintf('第 %d 行无法解析：%s', $lineNo, trim($line));
                 continue;
             }
 
@@ -244,6 +275,16 @@ final class Settings
 
             # 有顶层段时只认 access: 段里的项，避免把别的段的同名键读进来
             if ($seenSection && $section !== self::ROOT_KEY) {
+                continue;
+            }
+
+            /*
+             * 引号没闭合的同样算写坏了。unquote() 对 `"abc` 会原样返回，
+             * 于是那对引号变成值的一部分 —— 悄悄存进去一个带引号的字符串。
+             */
+            if ($value !== '' && ($value[0] === '"' || $value[0] === "'")
+                && substr($value, -1) !== $value[0]) {
+                $issues[] = sprintf('第 %d 行引号没有闭合：%s', $lineNo, trim($line));
                 continue;
             }
 

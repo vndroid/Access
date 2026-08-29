@@ -180,9 +180,11 @@ while (true) {
         break;
     }
 
+    $batchEnd = $lastId;
     $groups = [];
     foreach ($rows as $row) {
-        $lastId = (int)$row['id'];
+        # 只记本批扫到哪儿；$lastId 要等本批所有分组都写成功之后才推进（见批末）
+        $batchEnd = (int)$row['id'];
         $scanned++;
 
         $new = [];
@@ -228,12 +230,22 @@ while (true) {
                         ->where('id IN ?', $ids)
                 );
             } catch (\Throwable $e) {
-                fwrite(STDERR, "\n写入失败（id > {$lastId}）：" . $e->getMessage() . "\n");
-                fwrite(STDERR, "已处理到 id {$lastId}，用 --from={$lastId} 继续。\n");
+                /*
+                 * 提示里给的是**上一批的末尾**，不是本批的。
+                 *
+                 * 本批可能有一部分分组已经写成功、另一部分还没写，中途退出时无从分辨。
+                 * 报本批末尾的话，按提示续跑会把本批里没写成的那些整个跳过 ——
+                 * 而重跑已经写成功的分组是幂等的（值算出来一样，改动为空），代价只是多读一批。
+                 */
+                fwrite(STDERR, "\n写入失败（本批读到 id {$batchEnd}）：" . $e->getMessage() . "\n");
+                fwrite(STDERR, "本批未写完，请从上一批末尾续跑：--from={$lastId}\n");
                 exit(2);
             }
         }
     }
+
+    # 本批所有分组都写成功了，这时才允许推进续跑位置
+    $lastId = $batchEnd;
 
     $now = microtime(true);
     if ($now - $lastPrint >= 1.0) {

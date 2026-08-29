@@ -13,8 +13,11 @@
  *   --batch=1000              每批迁移的行数，默认 1000
  *   --yes                     跳过确认，直接开始
  *   --dry-run                 只显示待迁移数量，不写入
+ *   --retry-failed            把失败行的尝试次数清零，让它们重新进入自动补写
+ *                             （数据库约束、磁盘、权限之类的问题修好之后用这个）
  *   --forget-failed           清掉「写不进目标库」的行记录，之后可以重新标记完成
- *                             （这些行不会被补写，等于确认放弃它们）
+ *                             **等于永久放弃这些行**：断点早已越过它们，清掉记录之后
+ *                             除非 --from=0 整表重扫，否则再也不会被读到
  *
  * 退出码：
  *   0  迁移完成，或本来就没有需要迁移的数据
@@ -117,6 +120,7 @@ try {
         $total = Migrate::sourceCountStrict($main);
         $maxSourceId = Migrate::sourceMaxIdStrict($main);
         # 进度按断点算，不按目标表行数算：目标库自己产生的新日志不是「已迁移的历史数据」
+        # 同 Migrate::status()：这里只是打印概况，不传 $reserved，没有断点时把待迁移报成全部
         $checkpoint = Migrate::resumeFrom($main, $target, $fingerprint, $maxSourceId);
         $pending = Migrate::pendingCount($main, $checkpoint);
     } catch (\Throwable $e) {
@@ -130,6 +134,22 @@ try {
     out('断点 id > ' . number_format($checkpoint) . '，已扫过 ' . number_format($migrated) . ' 行');
     out('待迁移 ' . number_format($pending) . ' 行');
 
+    if (!empty($argvOptions['retry-failed'])) {
+        # 这也是一次写入，同样要让 --dry-run 挡住
+        $pending = count(Migrate::failures($main, $fingerprint));
+        if (!empty($argvOptions['dry-run'])) {
+            out(sprintf('--dry-run：本会把 %s 行的尝试次数清零，未执行。', number_format($pending)));
+        } else {
+            try {
+                $reset = Migrate::resetFailureAttempts($main, $fingerprint);
+                out(sprintf('已把 %s 行失败记录的尝试次数清零，本次会重新补写它们。', number_format($reset)));
+            } catch (\Throwable $e) {
+                out('清零尝试次数失败：' . $e->getMessage());
+                exit(1);
+            }
+        }
+    }
+
     if (!empty($argvOptions['forget-failed'])) {
         $forgotten = count(Migrate::failures($main, $fingerprint));
         # 这也是一次写入，同样要让 --dry-run 挡住
@@ -137,7 +157,8 @@ try {
             out(sprintf('--dry-run：本会清掉 %s 行失败记录，未执行。', number_format($forgotten)));
         } else {
             Migrate::clearFailures($main, $fingerprint);
-            out(sprintf('已清掉 %s 行失败记录（这些行不会被补写）。', number_format($forgotten)));
+            out(sprintf('已清掉 %s 行失败记录。', number_format($forgotten)));
+            out('注意：断点早已越过这些行，它们不会被补写，除非用 --from=0 整表重扫。');
         }
     }
 

@@ -87,7 +87,7 @@ final class Migrate
      * 试满这个次数后不再自动补写，但记录保留着，完成标记照样打不下去，
      * 人工修完再 --forget-failed 或者让它下一轮补上。
      */
-    private const MAX_FAILED_ATTEMPTS = 3;
+    public const MAX_FAILED_ATTEMPTS = 3;
 
     /** 3.1.0 早期版本曾经把标记写在插件配置里，保留用于兼容与清理 */
     private const LEGACY_DONE_KEY = 'dbMigrateDone';
@@ -154,9 +154,15 @@ final class Migrate
              * 被静默跳过；migratedCount() 还把它们算成「已迁移」，连 pending 都是错的。
              * 抬高起点之后，目标库新产生的日志一律落在源表最大 id 之上，两边不再交叠。
              */
-            self::reserveIdRange($target, $maxSourceId);
+            $reserved = self::reserveIdRange($target, $maxSourceId);
 
-            $checkpoint = self::resumeFrom($main, $target, $fingerprint, $maxSourceId);
+            if (self::checkpoint($main, $fingerprint) === null
+                && self::foreignRowInRange($main, $target, $maxSourceId) !== null) {
+                # 目标表里有外来行，迁移会静默丢数据。状态保持 None，什么标记都不打
+                return $result;
+            }
+
+            $checkpoint = self::resumeFrom($main, $target, $fingerprint, $maxSourceId, $reserved);
             $pending = self::pendingCount($main, $checkpoint);
         } catch (\Throwable $e) {
             # 探测本身失败：状态保持 None，什么标记都不打
@@ -224,6 +230,11 @@ final class Migrate
          * 进度同样按断点算，不按目标表行数算 —— 目标库自己产生的新日志
          * 不是「已迁移的历史数据」，把它们算进来会显示成虚假的完成度。
          */
+        /*
+          * 这里不传 $reserved（默认 false）：status() 是纯展示，不该顺手去改目标表的自增起点。
+          * 后果是没有断点的站点在真正跑过一次之前，进度显示成「一行没迁」——
+          * 宁可把待办报多，也不能报少。跑过一次之后断点就存下来了，两边的数字自然一致。
+          */
         $checkpoint = self::resumeFrom($main, $target, self::fingerprint($dbSettings), self::sourceMaxId($main));
         $pending = self::pendingCountSafe($main, $checkpoint, $total);
 
@@ -283,7 +294,7 @@ final class Migrate
          * ensure() 在走 Skipped 分支之前也会调一次 —— 那条路根本到不了这里，
          * 而插件保存完设置就开始往目标库写新日志了。
          */
-        self::reserveIdRange($target, $maxSourceId);
+        $reserved = self::reserveIdRange($target, $maxSourceId);
 
         @set_time_limit(0);
 
@@ -297,7 +308,25 @@ final class Migrate
         # 上几轮写不进去的行，先补写一次再往下扫
         $retried = self::retryFailures($main, $target, $fingerprint, $columns);
 
-        $lastId = self::resumeFrom($main, $target, $fingerprint, $maxSourceId);
+        /*
+         * 还没有断点 = 这是对这个目标库的第一次迁移。动手之前先确认迁移 id 区间里
+         * 没有「目标库自己产生的行」—— 有的话它们占着的主键会让源表对应的行
+         * 撞 ON CONFLICT 静默消失（见 foreignRowInRange() 的说明）。
+         */
+        if (self::checkpoint($main, $fingerprint) === null) {
+            $foreign = self::foreignRowInRange($main, $target, $maxSourceId);
+            if ($foreign !== null) {
+                return self::runResult(0, false, 0, [], sprintf(
+                    '目标表在迁移用的主键区间（id <= %d）里已经存在不是迁移来的记录（例如 id=%d），'
+                    . '继续迁移会让源表中相同 id 的行撞上主键冲突后被静默丢弃。'
+                    . '请先把目标表这部分记录移走或清空（确认它们不需要保留），再重新执行迁移。',
+                    $maxSourceId,
+                    $foreign
+                ));
+            }
+        }
+
+        $lastId = self::resumeFrom($main, $target, $fingerprint, $maxSourceId, $reserved);
         $already = max(0, $total - self::pendingCountSafe($main, $lastId, $total));
         $moved = $retried['written'];
         $done = true;
@@ -675,13 +704,16 @@ final class Migrate
 
     /**
      * 把目标表的自增起点抬到源表最大 id 之上
-     * 失败不阻断迁移，最坏情况是迁移期间产生的少量新日志主键冲突后被跳过
+     *
+     * **返回值必须看。** 以前这里的异常被整个吞掉，而 resumeFrom() 又会在没有断点时
+     * 用目标表 MAX(id) 推导续传起点 —— 抬起点失败时目标库的新日志照样落在迁移区间里，
+     * 推导出来的断点直接跳过源表前面一整截。两处合起来正好复现断点机制要修的那个洞。
      *
      * @param Db $target
      * @param int $maxSourceId
-     * @return void
+     * @return bool 是否确实抬高了（失败时调用方不能再信任 MAX(id) 推导）
      */
-    private static function reserveIdRange(Db $target, int $maxSourceId): void
+    private static function reserveIdRange(Db $target, int $maxSourceId): bool
     {
         $table = $target->getPrefix() . 'access';
 
@@ -704,7 +736,9 @@ final class Migrate
                     Db::WRITE
                 ),
             };
+            return true;
         } catch (\Throwable $e) {
+            return false;
         }
     }
 
@@ -804,20 +838,170 @@ final class Migrate
      * @param int $maxSourceId
      * @return int
      */
-    public static function resumeFrom(Db $main, Db $target, string $fingerprint, int $maxSourceId): int
-    {
+    public static function resumeFrom(
+        Db $main,
+        Db $target,
+        string $fingerprint,
+        int $maxSourceId,
+        bool $reserved = false
+    ): int {
         $stored = self::checkpoint($main, $fingerprint);
         if ($stored !== null) {
             return $stored;
         }
 
+        /*
+         * 没有断点，只能推导。推导之前有两道闸门，任一不过就从 0 重扫 ——
+         * 重扫的代价只是慢，而推错的代价是永久漏掉源表前面一整截。
+         */
+
+        # 闸门一：这一轮连自增起点都没抬起来，目标库的新日志还会落进迁移区间，不能推导
+        if (!$reserved) {
+            return 0;
+        }
+
         try {
-            return (int)($target->fetchAll(
+            $candidate = (int)($target->fetchAll(
                 $target->select('MAX(id) AS max_id')->from('table.access')->where('id <= ?', $maxSourceId)
             )[0]['max_id'] ?? 0);
         } catch (\Throwable $e) {
             return 0;
         }
+
+        if ($candidate <= 0) {
+            return 0;
+        }
+
+        /*
+         * 闸门二：候选断点那一行，究竟是「从源库搬过来的副本」还是「目标库自己产生的日志」？
+         *
+         * 抬高自增起点只管得了以后，管不了以前：老版本在 Skipped 分支下没有抬起点，
+         * 目标库已经从 id=1 开始写过自己的访问日志。这些行同样落在 id <= 源表最大 id 里，
+         * MAX(id) 分不出它们和迁移数据。所以直接比对一行 —— 源库同 id 的那一行，
+         * 内容对得上才认这个断点。两边都是主键查找，代价很小。
+         */
+        if (!self::looksMigrated($main, $target, $candidate)) {
+            return 0;
+        }
+
+        return $candidate;
+    }
+
+    /**
+     * 目标表 id=$id 的那一行，看起来是不是源表同 id 行的副本
+     *
+     * event_id 能对上就最确定（迁移是整行复制，标识跟着一起搬）。
+     * 3.2.0 之前的存量行没有 event_id，退而比对 time + ip + path ——
+     * 这三样凑巧全同又恰好落在同一个 id 上的概率可以忽略，而判错的方向是安全的：
+     * 认不出来就返回 false，最坏结果是多重扫一遍。
+     *
+     * @param Db $main
+     * @param Db $target
+     * @param int $id
+     * @return bool
+     */
+    /**
+     * 目标库的迁移 id 区间里，有没有「不是迁移来的」行
+     *
+     * **这是整个迁移里最危险的一件事，必须在动手之前拦下来。**
+     * COLUMNS 里包含 id —— 迁移是连主键一起复制的。目标库如果已经有自己产生的低 id 日志
+     * （旧版本走 Skipped 分支时就是这个形态：配置已切换、迁移被推迟、前台从 id=1 开始写），
+     * 那些主键就被占住了；源表对应的行撞上 ON CONFLICT DO NOTHING 被**静默丢弃**，
+     * insertBatchDetailed 还会把它们计成写入成功（整批 INSERT 没报错），最后 done=true。
+     * 实测：源表 50 行、目标库有 20 条自己的日志，迁完只剩 30 行，另外 20 行永久消失
+     * 且被正式宣告「迁移完成」。
+     *
+     * 主键是复制过来的，所以不能改成让目标库自己分配 id：3.2.0 之前的存量行没有 event_id，
+     * 它们的重放幂等**只靠这个主键**，去掉就等于每重跑一次多一份。
+     *
+     * 判定用抽样：只在「还没有断点」时做（有断点就说明这个区间是我们自己扫出来的）。
+     * 抽样点取区间的最小、最大和中间若干个 —— 已知的故障形态是「从 id=1 开始的一段连续原生行」，
+     * 最小 id 那一枪就能打中；取多个点只是加固。
+     *
+     * @param Db $main
+     * @param Db $target
+     * @param int $maxSourceId
+     * @return int|null 撞上的那一行 id；没发现返回 null
+     */
+    private static function foreignRowInRange(Db $main, Db $target, int $maxSourceId): ?int
+    {
+        try {
+            $bounds = $target->fetchRow(
+                $target->select('MIN(id) AS lo', 'MAX(id) AS hi', 'COUNT(1) AS n')
+                    ->from('table.access')->where('id <= ?', $maxSourceId)
+            );
+        } catch (\Throwable $e) {
+            # 查不出来就别放行 —— 但也不能凭空报错，交给调用方按「认不出来」处理
+            return null;
+        }
+
+        $count = (int)($bounds['n'] ?? 0);
+        if ($count === 0) {
+            return null;
+        }
+
+        $lo = (int)($bounds['lo'] ?? 0);
+        $hi = (int)($bounds['hi'] ?? 0);
+        if ($lo <= 0) {
+            return null;
+        }
+
+        $samples = [$lo, $hi];
+        $step = max(1, intdiv($hi - $lo, 8));
+        for ($id = $lo + $step; $id < $hi; $id += $step) {
+            $samples[] = $id;
+        }
+
+        foreach (array_unique($samples) as $id) {
+            try {
+                $exists = $target->fetchRow(
+                    $target->select('id')->from('table.access')->where('id = ?', $id)
+                );
+            } catch (\Throwable $e) {
+                continue;
+            }
+            if (empty($exists)) {
+                continue;
+            }
+            if (!self::looksMigrated($main, $target, (int)$id)) {
+                return (int)$id;
+            }
+        }
+
+        return null;
+    }
+
+    private static function looksMigrated(Db $main, Db $target, int $id): bool
+    {
+        try {
+            $src = $main->fetchRow(
+                $main->select('id', 'event_id', 'time', 'ip', 'path')->from('table.access')->where('id = ?', $id)
+            );
+            $dst = $target->fetchRow(
+                $target->select('id', 'event_id', 'time', 'ip', 'path')->from('table.access')->where('id = ?', $id)
+            );
+        } catch (\Throwable $e) {
+            # 源表可能还没有 event_id 列（3.1.x 残留），或者连接出问题；一律当作认不出来
+            return false;
+        }
+
+        if (empty($src) || empty($dst)) {
+            return false;
+        }
+
+        $srcEvent = (string)($src['event_id'] ?? '');
+        $dstEvent = (string)($dst['event_id'] ?? '');
+        if ($srcEvent !== '' && $dstEvent !== '') {
+            return $srcEvent === $dstEvent;
+        }
+
+        foreach (['time', 'ip', 'path'] as $column) {
+            if ((string)($src[$column] ?? '') !== (string)($dst[$column] ?? '')) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -1132,9 +1316,24 @@ final class Migrate
         }
         ksort($entry);
 
-        # 只留前面这些，够定位问题就行，不让这一行无限变长
+        /*
+         * 清单满了就**抛异常停手**，绝不能截断。
+         *
+         * 原来是 array_slice 留前 500 个（按 id 升序，即留下 id 小的）。可断点是照常
+         * 推进的 —— 被截掉的那些 id 更大的失败行，既不在清单里、也已经被断点越过，
+         * 从此不会再被读到。更糟的是：等清单里剩下的 500 条后来被修好清空，
+         * failures() 返回空，ensure() 就会打下完成标记 —— 那批被截掉的行被正式宣告「迁完了」。
+         *
+         * 500 行写不进去本身就说明出了系统性问题，不该靠悄悄丢记录来「继续跑」。
+         * 抛出去之后 run() 里的 saveCheckpoint() 不会执行，这批（含失败行）下轮会重读。
+         */
         if (count($entry) > self::MAX_FAILED_TRACKED) {
-            $entry = array_slice($entry, 0, self::MAX_FAILED_TRACKED, true);
+            throw new \RuntimeException(sprintf(
+                '写不进目标库的行已超过 %d 条，迁移停止（断点未推进）。'
+                . '请先排查这些行为什么写不进去；修好之后用 --retry-failed 重试，'
+                . '或者确认放弃它们后用 --forget-failed 清掉记录。',
+                self::MAX_FAILED_TRACKED
+            ));
         }
         $all[$fingerprint] = $entry;
 
@@ -1171,6 +1370,33 @@ final class Migrate
 
         $all[$fingerprint] = $entry;
         self::writeFailed($main, $all);
+    }
+
+    /**
+     * 把失败行的尝试次数清零，让它们重新进入自动补写
+     *
+     * 试满 MAX_FAILED_ATTEMPTS 之后 retryFailures() 就不再碰它们了 —— 这对
+     * 「一直是脏数据」是对的，但对「约束配错了、库满了，修好之后」就成了死路：
+     * 记录还在（完成标记打不下去），却再也不会被补写。而断点早已越过这些行，
+     * 直接 clearFailures() 等于永久漏掉它们。所以要有这条复位的路。
+     *
+     * @param Db $main
+     * @param string $fingerprint
+     * @return int 被复位的行数
+     * @throws \Throwable
+     */
+    public static function resetFailureAttempts(Db $main, string $fingerprint): int
+    {
+        $all = self::readFailed($main);
+        $entry = $all[$fingerprint] ?? [];
+        if (empty($entry)) {
+            return 0;
+        }
+
+        $all[$fingerprint] = array_fill_keys(array_keys($entry), 0);
+        self::writeFailed($main, $all);
+
+        return count($entry);
     }
 
     /**

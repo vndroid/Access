@@ -766,12 +766,62 @@ LUA;
                  * 语句还没发出去就整批失败（连不上、拼不出语句）—— 一行 failed 都拿不到，
                  * 没有任何依据说这批数据有问题，原样留着。
                  */
-                if ($outcome['fatal'] !== null) {
-                    self::markStuck($redis);
-                    $result['stopped'] = 'db';
+                $fatal = $outcome['fatal'];
+                if ($fatal !== null) {
+                    /*
+                     * 这条路也必须走 STUCK_SECONDS 那道闸门。
+                     *
+                     * 原来只 markStuck() 就 break，从不比较上限 —— 只有下面逐行失败那条路
+                     * 会检查。于是一个持续性的连接层故障（库没了、账号被删、语句永远拼不出来）
+                     * 会让这批永远停在 processing：主队列照常堆积，涨到 MAX_LENGTH 之后
+                     * 从队首开始丢，丢的还是最早的那些。堵住的代价最终还是丢数据，只是换了个地方。
+                     */
+                    $stuckFor = self::stuckFor($redis);
+
+                    if ($stuckFor === null || $stuckFor < self::STUCK_SECONDS) {
+                        self::markStuck($redis);
+                        $result['stopped'] = 'db';
+                        $result['error'] = sprintf(
+                            '目标库写入失败（%s），本批 %d 条已保留在队列中等待重试，'
+                            . '已卡住 %d 秒（上限 %d 秒）：%s',
+                            $fatal->name,
+                            count($items),
+                            (int)($stuckFor ?? 0),
+                            self::STUCK_SECONDS,
+                            (string)$outcome['error']
+                        );
+                        break;
+                    }
+
+                    /*
+                     * 卡过头了，放行。这一批拿不到任何「哪几行有问题」的信息，
+                     * 只能整批转死信 —— 至少留下原始内容可查、可回放，
+                     * 而不是让它继续堵着直到主队列自己把更早的数据丢掉。
+                     */
+                    $dead = [];
+                    foreach ($items as $item) {
+                        $dead[] = ['reason' => $fatal->reason(), 'payload' => $item];
+                    }
+                    $result['dead'] += self::pushDead($redis, $dead);
+
+                    if ($redis->lTrim(self::processingKey(), count($items), -1) === false) {
+                        $error = $redis->getLastError();
+                        $redis->clearLastError();
+                        throw new \RuntimeException(
+                            '确认批次失败（LTRIM processing）：'
+                            . ($error !== null && $error !== '' ? $error : '未知错误')
+                        );
+                    }
+                    self::clearStuck($redis);
+
+                    $result['attempted'] += count($items);
+                    $result['rejected']  += count($items);
+                    $result['stopped']   = 'db';
                     $result['error'] = sprintf(
-                        '目标库写入失败（%s），本批 %d 条已保留在队列中等待重试：%s',
-                        $outcome['fatal']->name,
+                        '目标库写入持续失败（%s）已达 %d 秒（上限 %d 秒），本批 %d 条转入死信队列以免堵死队列：%s',
+                        $fatal->name,
+                        (int)$stuckFor,
+                        self::STUCK_SECONDS,
                         count($items),
                         (string)$outcome['error']
                     );
@@ -1033,12 +1083,16 @@ LUA;
                 if ($legacy === $current || !$redis->exists($legacy)) {
                     continue;
                 }
-                if ($redis->exists($current)) {
-                    $out['skipped'][] = $legacy;
-                    continue;
-                }
-                if ($redis->rename($legacy, $current)) {
+                /*
+                 * RENAMENX：目标键不存在时才改名，判断和改名在 Redis 内部是一步。
+                 * 原来是先 exists($current) 再 rename() —— 两步之间生产者完全可能
+                 * 刚好创建了新键，随后被 rename 整个覆盖掉，那一批消息就没了。
+                 */
+                if ($redis->renameNx($legacy, $current)) {
                     $out['adopted'][] = $legacy;
+                } else {
+                    # 新键已存在（或源键刚好没了），原样留着让人工处理
+                    $out['skipped'][] = $legacy;
                 }
             }
 
@@ -1163,6 +1217,9 @@ LUA;
      * 所以这里只动这两段：
      *   HTTPS://WAVE.COM/Article/Foo?Q=1  →  https://wave.com/Article/Foo?Q=1
      * 用户信息（user:pass@）也原样保留 —— 密码是区分大小写的。
+     * 主机名部分要认两种形态：普通域名，以及 IPv6 字面量的 [....]。
+     * 只写 [^/?#:]* 的话，[FE80::ABCD] 会在第一个冒号处停下，
+     * 只有 "[FE80" 被小写，后半段原样留着 —— 等于没规范化。
      *
      * strtolower() 而不是 mb_strtolower()：PHP 8.2 起前者只映射 ASCII 的 A-Z，
      * 正好对应 DNS 的大小写规则；后者会去动非 ASCII 字符，
@@ -1178,7 +1235,7 @@ LUA;
         }
 
         return (string)preg_replace_callback(
-            '~^([a-zA-Z][a-zA-Z0-9+.\-]*://)([^/?#@]*@)?([^/?#:]*)~',
+            '~^([a-zA-Z][a-zA-Z0-9+.\-]*://)([^/?#@]*@)?(\[[^\]]*\]|[^/?#:]*)~',
             static fn(array $m): string => strtolower($m[1]) . ($m[2] ?? '') . strtolower($m[3] ?? ''),
             $url,
             1
