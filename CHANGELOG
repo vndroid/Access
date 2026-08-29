@@ -1,3 +1,25 @@
+v3.2.5
+2026年08月29日
+    - **来源域名统一小写后入库**。主机名不区分大小写（RFC 3986 §3.2.2），但入库时没做规范化，
+      于是 wave.com 和 WAVE.COM 在 GROUP BY 里成了两个来源，同一个站点被拆开、Top N 的名次也失真。
+      规范化落在 Queue::normalize()（入队和直写共用的收口）：
+      referer_domain / entrypoint_domain 整列小写；referer / entrypoint 走新增的
+      Queue::normalizeUrl()，**只把 scheme 和主机名小写，path 和 query 原样保留** ——
+      后两者是区分大小写的，一起小写会把 /Article/Foo 变成另一个地址。
+      用户信息（user:pass@）也保留原样，密码区分大小写。
+      只规范化 *_domain 两列是不够的：控制台的「来源 URL」Top N 按 entrypoint 整串分组，
+      HTTPS://WAVE.COM/x 和 https://wave.com/x 在那一栏照样会分成两条
+    - **修复站内来源被当成外部来源**。getEntryPoint() 里判断「来路是不是本站」用的是
+      逐字比较主机名，而主机名不区分大小写：来路写成 HTTPS://YOURSITE.COM/x 时跟 siteUrl
+      对不上，于是自己站内的跳转被记成外部来源混进统计，还会被写进 cookie 一路带下去。
+      现在先规范化再比，两边都按小写比对
+    - 新增 tools/normalize-domains.php，把存量数据的这四列规范化。
+      支持 --dry-run、--limit + --from 分批续跑，重复执行幂等。
+      预筛条件**按引擎分开写**：MySQL 默认排序规则不区分大小写，`col <> LOWER(col)` 恒为假，
+      照搬 PostgreSQL 的写法会让预筛把所有行都判成「不用改」，跑完一行没动还看不出问题。
+      也正因为这个默认规则，本问题主要出现在 PostgreSQL 和 SQLite 上（两者默认比较区分大小写），
+      MySQL 的 GROUP BY 本来就把大小写变体合在一起了
+
 v3.2.4
 2026年08月29日
     - **修复 UA 认不出来就当成人类**。isRobot() 原来只有两条判据（一条正则、一条名单），

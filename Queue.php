@@ -1114,6 +1114,21 @@ LUA;
 
             if ($value !== null && isset(self::LIMITS[$column])) {
                 $value = (string)$value;
+
+                /*
+                 * 主机名不区分大小写（RFC 3986 §3.2.2），统一小写之后再入库。
+                 * 不做的话 wave.com 和 WAVE.COM 在 GROUP BY 里是两个来源，
+                 * 同一个站点被拆成好几条，Top N 的名次也跟着失真。
+                 *
+                 * 只动 scheme 和主机名两段：path 和 query 是区分大小写的，
+                 * 一起小写会把 /Article/Foo 变成另一个地址。
+                 */
+                if (in_array($column, self::HOST_COLUMNS, true)) {
+                    $value = strtolower($value);
+                } elseif (in_array($column, self::URL_COLUMNS, true)) {
+                    $value = self::normalizeUrl($value);
+                }
+
                 # varchar(N) 数的是字符不是字节，所以用 mb_ 系列
                 if (mb_strlen($value, 'UTF-8') > self::LIMITS[$column]) {
                     $value = mb_substr($value, 0, self::LIMITS[$column], 'UTF-8');
@@ -1125,6 +1140,49 @@ LUA;
             $normalized[$column] = $value;
         }
         return $normalized;
+    }
+
+    /**
+     * 只含主机名的列：整列小写
+     */
+    private const HOST_COLUMNS = ['referer_domain', 'entrypoint_domain'];
+
+    /**
+     * 完整 URL 的列：只把 scheme 和主机名小写，其余原样
+     *
+     * 控制台的「来源」Top N 是按 entrypoint 整串分组的，
+     * 只规范化 *_domain 两列的话，HTTPS://WAVE.COM/x 和 https://wave.com/x
+     * 在 URL 那一栏照样会被拆成两条。
+     */
+    private const URL_COLUMNS = ['referer', 'entrypoint'];
+
+    /**
+     * 把 URL 里不区分大小写的部分统一成小写
+     *
+     * RFC 3986 规定 scheme（§3.1）和 host（§3.2.2）不区分大小写，其余部分区分。
+     * 所以这里只动这两段：
+     *   HTTPS://WAVE.COM/Article/Foo?Q=1  →  https://wave.com/Article/Foo?Q=1
+     * 用户信息（user:pass@）也原样保留 —— 密码是区分大小写的。
+     *
+     * strtolower() 而不是 mb_strtolower()：PHP 8.2 起前者只映射 ASCII 的 A-Z，
+     * 正好对应 DNS 的大小写规则；后者会去动非 ASCII 字符，
+     * 而国际化域名的大小写折叠是 IDNA 的事，不该在这里顺手做。
+     *
+     * @param string $url
+     * @return string
+     */
+    public static function normalizeUrl(string $url): string
+    {
+        if ($url === '') {
+            return '';
+        }
+
+        return (string)preg_replace_callback(
+            '~^([a-zA-Z][a-zA-Z0-9+.\-]*://)([^/?#@]*@)?([^/?#:]*)~',
+            static fn(array $m): string => strtolower($m[1]) . ($m[2] ?? '') . strtolower($m[3] ?? ''),
+            $url,
+            1
+        );
     }
 
     /**

@@ -1405,7 +1405,18 @@ LUA;
          */
         $entrypoint = self::plausibleUrl($entrypoint);
 
-        if (parse_url($entrypoint, PHP_URL_HOST) == parse_url(Helper::options()->siteUrl, PHP_URL_HOST)) {
+        /*
+         * 规范化要排在下面那个「是不是站内来源」的比较之前。
+         *
+         * 主机名不区分大小写，而这里原来是逐字比较：来路写成 HTTPS://YOURSITE.COM/x 时
+         * 跟 siteUrl 的主机名对不上，于是**自己站内的跳转被当成外部来源记了下来**，
+         * 混进来源统计里，还会被写进 cookie 一路带下去。
+         * 顺手也让写进 cookie 的值是规范化过的，后续请求带回来的就不会再有大小写变体。
+         */
+        $entrypoint = Queue::normalizeUrl($entrypoint);
+
+        $siteHost = strtolower((string)parse_url(Helper::options()->siteUrl, PHP_URL_HOST));
+        if (strtolower((string)parse_url($entrypoint, PHP_URL_HOST)) === $siteHost) {
             $entrypoint = '';
         }
         if ($entrypoint != null) {
