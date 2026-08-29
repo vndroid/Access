@@ -28,7 +28,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.2.3
+ * @version 3.2.4
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
@@ -194,7 +194,7 @@ class Plugin implements PluginInterface
         $msg .= $dropNote;
         $msg .= $saved
             ? '，当前配置已写入至 current.yaml 中'
-            : '，配置因目录或文件不可写未能写入';
+            : '，配置因文件或目录不可写未能写入';
         $msg .= self::drainNote($drain, $keepQueue);
 
         return _t($msg);
@@ -323,13 +323,13 @@ class Plugin implements PluginInterface
             'writeType', [
                 '0' => '前端',
                 '1' => '后端',
-            ], '1', '统计类型', '日志写入类型（若选择为前端方式，如果使用了 PJAX，请在 PJAX 相关事件中调用 window.Access.track() 方法），若写入速度较慢可选择前端写入日志。'
+            ], '1', '统计类型', '日志写入类型（若选择为前端方式，如果使用了 PJAX，请在 PJAX 相关事件中调用 <code>window.Access.track()</code> 方法），理论上前端吞吐量大于后端'
         );
         $isPaid = new Radio(
             'isPaid', [
                 '0' => 'Lite',
                 '1' => 'Core',
-            ], '0', 'IPinfo 接口类型', '默认使用 Lite（免费版），字段相比 Core（付费版）少'
+            ], '0', 'IPinfo 接口类型', '默认使用 Lite（免费版），支持的字段相比 Core（付费版）少，<a href="https://ipinfo.io/developers" target="_blank">官方文档</a> '
         );
         $isToken = new Text(
             'isToken', null, '',

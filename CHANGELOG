@@ -1,3 +1,32 @@
+v3.2.4
+2026年08月29日
+    - **修复 UA 认不出来就当成人类**。isRobot() 原来只有两条判据（一条正则、一条名单），
+      两条都不命中时 robot 记 0 —— 于是这样的记录被当成了真人访问：
+        Hello from Palo Alto Networks, find out more about our scans in https://…
+      实测同样被记成人类的还有 CensysInspect、InternetMeasurement、masscan，
+      以及 **curl 和 wget**、空 UA、只有一个 "-" 的 UA。后两类影响面比单个扫描器大得多。
+      现在判据按「最确定 → 最兜底」排成六条，任一命中即为机器人：
+      ① 已知工具名（curl / wget / masscan / python-requests / okhttp / Java …）
+      ② 收录的爬虫名单  ③ 名字里带 bot / spider / client / User 的正则
+      ④ **UA 里写了 URL 或邮箱** —— 爬虫二十多年的惯例是把联系方式写进 UA（+http://…），
+         真实浏览器没这个需要；名字取 URL 主机名或邮箱域名，同一家扫描器能聚到一起
+      ⑤ UA 为空或只是占位符  ⑥ **兜底：浏览器和操作系统都认不出来**
+      第 ⑥ 条是关键：真实浏览器的 UA 一定给得出浏览器或系统特征，两样都给不出的绝大多数是脚本。
+      宁可把小众浏览器误记成机器人（看一眼 UA 就能发现），也好过让扫描器混在人类流量里
+    - 名单改为**按词边界匹配**，并清掉三类坏条目。原来是「去空格小写后求子串」，没有边界，实测：
+      * `Custo` 命中了长文本 UA 里的 **customers**（Palo Alto Expanse 那条），robot_id 记成毫无意义的 Custo
+      * `Presto` 命中 **Opera 12** 的 Presto/2.10.289 —— 真实浏览器被判成机器人
+      * `Ask` 会命中任何含 ask 的串（task、Basketball…）
+      同时删掉了永远匹配不到真实 UA 的条目：`Alexa (IA Archiver)`、`Java (Often spam bot)`
+      括号里是给人看的注释却被当成匹配串；`WGet tools` 归一化成 wgettools，对不上 `Wget/1.21.3`。
+      `Presto`、`TencentTraveler`（腾讯 TT）是真实浏览器，已移除，别再加回来
+    - 名单的匹配挪到通用正则**前面**：正则抓的是「紧挨着 bot/spider 的那一个词」，
+      名字常截到一半 —— `Sogou web spider/4.0` 会被记成 "web spider"
+    - 新增 tools/reclassify-robots.php，按新规则重算存量数据的 robot / robot_id / robot_version。
+      只改这三列；支持 --dry-run 预览改动明细、--limit + --from 分批续跑；
+      改动按目标值分组用 WHERE id IN (...) 打包，两百多万行不会退化成几十万次单行 UPDATE。
+      重复执行是幂等的
+
 v3.2.3
 2026年08月28日
     - **修复大表推迟迁移时，目标库的新日志会吃掉源表数据**。抬高目标表自增起点这一步

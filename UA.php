@@ -8,10 +8,70 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
 
 class UA
 {
+    /** UA 为空或只是个占位符时记的名字 */
+    public const NO_UA = '(no user-agent)';
+
+    /** 浏览器和操作系统都认不出来时记的名字 */
+    public const UNIDENTIFIED = '(unidentified)';
+
+    /**
+     * 已知的命令行工具 / HTTP 客户端 / 扫描器：匹配串 => 记进 robot_id 的名字
+     *
+     * 单独一张表而不是塞进 $robots，是因为这些要**排在名单前面**判：
+     * 名单里有 Custo、Ask 这种短词，遇到长文本 UA 容易先命中并盖掉真正的名字。
+     * 实测 Palo Alto Expanse 那条长 UA 就被 Custo 命中过（来自 customers 一词）。
+     */
+    private static array $tools = [
+        'curl'               => 'curl',
+        'Wget'               => 'Wget',
+        'libwww-perl'        => 'libwww-perl',
+        'lwp-trivial'        => 'lwp-trivial',
+        'python-requests'    => 'python-requests',
+        'python-urllib'      => 'python-urllib',
+        'python-httpx'       => 'python-httpx',
+        'aiohttp'            => 'aiohttp',
+        'httpx'              => 'httpx',
+        'Go-http-client'     => 'Go-http-client',
+        'okhttp'             => 'okhttp',
+        'axios'              => 'axios',
+        'node-fetch'         => 'node-fetch',
+        'GuzzleHttp'         => 'GuzzleHttp',
+        'Apache-HttpClient'  => 'Apache-HttpClient',
+        'RestSharp'          => 'RestSharp',
+        'PostmanRuntime'     => 'PostmanRuntime',
+        'Java'               => 'Java',
+        'Scrapy'             => 'Scrapy',
+        'HTTrack'            => 'HTTrack',
+        'WinHttp'            => 'WinHttp',
+        'masscan'            => 'masscan',
+        'zgrab'              => 'zgrab',
+        'zmap'               => 'zmap',
+        'Nmap'               => 'Nmap',
+        'Nuclei'             => 'Nuclei',
+        'sqlmap'             => 'sqlmap',
+        'Nikto'              => 'Nikto',
+        'WPScan'             => 'WPScan',
+        'CensysInspect'      => 'CensysInspect',
+        'InternetMeasurement' => 'InternetMeasurement',
+        'Expanse'            => 'Expanse',
+        'HeadlessChrome'     => 'HeadlessChrome',
+        'PhantomJS'          => 'PhantomJS',
+    ];
+
+    /**
+     * 收录的爬虫名单，按词边界匹配（见 wordPattern()）
+     *
+     * 移除过的条目，别再加回来：
+     *   Presto           —— Opera 12 的排版引擎，真实浏览器
+     *   TencentTraveler  —— 腾讯 TT 浏览器，真实浏览器
+     *   Ask              —— 三个字母，会命中 task、Basketball 之类；换成 AskJeeves / Teoma
+     * 括号里写说明的条目（Alexa (IA Archiver)、Java (Often spam bot)）也删了：
+     * 那些括号是给人看的注释，却被当成匹配串的一部分，永远匹配不到任何真实 UA。
+     * 命令行工具挪进了 $tools。
+     */
     private static array $robots = [
-        'Alexa (IA Archiver)',
         'AppEngine-Google',
-        'Ask',
+        'AskJeeves',
         'BSpider',
         'BaiDuSpider',
         'Baiduspider',
@@ -24,11 +84,9 @@ class UA
         'Exabot',
         'Fish search',
         'GigaExplorator',
-        'Go-http-client',
         'Google AdSense',
         'Googlebot',
         'Heritrix',
-        'Java (Often spam bot)',
         'MJ12bot',
         'MSIECrawler',
         'MSNBot',
@@ -36,24 +94,18 @@ class UA
         'Nimbostratus-Bot',
         'Nutch',
         'OutfoxBot/YodaoBot',
-        'Perl tool',
-        'Presto',
-        'Python-urllib',
-        'python-httpx',
         'Reeder',
-        'Scrapy',
         'Sogou Spider',
         'Sogou inst spider',
         'Sogou web spider',
-        'Sosospider+',
+        'Sosospider',
         'Speedy Spider',
         'StackRambler',
         'SurveyBot',
-        'TencentTraveler',
+        'Teoma',
         'Tiny Tiny RSS',
         'UptimeRobot',
         'Voila',
-        'WGet tools',
         'WordPress',
         'Yahoo Slurp',
         'Yahoo! Slurp',
@@ -61,7 +113,6 @@ class UA
         'YandexBot',
         'YisouSpider',
         'YoudaoBot',
-        'aiohttp',
         'bingbot',
         'crawler',
         'gce-spider',
@@ -69,12 +120,9 @@ class UA
         'inoreader',
         'larbin',
         'legs',
-        'lwp-trivial',
         'msnbot',
-        'python-requests',
         'twiceler',
         'yacy',
-        'zgrab',
     ];
 
     private string $ua;
@@ -113,25 +161,150 @@ class UA
         return $this->ua;
     }
 
+    /**
+     * 这次访问是不是机器人
+     *
+     * 判定顺序从「最确定」到「最兜底」，任一命中即为机器人：
+     *   1. 已知工具名（curl / wget / masscan / python-requests …），按词边界匹配
+     *   2. 收录的爬虫名单，按词边界匹配
+     *   3. 名字里带 bot / spider / client / User 的（原有正则，名单没收录时兜底）
+     *   4. UA 里写了 URL 或邮箱 —— 爬虫界的长期惯例是把联系方式写进 UA，
+     *      真实浏览器几乎不会这么做
+     *   5. UA 为空或只是个占位符 —— 真实浏览器一定会发 UA
+     *   6. **兜底：既认不出浏览器、也认不出操作系统**
+     *
+     * 第 6 条是这次补上的关键一条。以前前五条（当时只有两条）都不命中就直接算人类，
+     * 于是像
+     *   Hello from Palo Alto Networks, find out more about our scans in https://…
+     * 这样的扫描器、以及 curl / wget / 空 UA，全都被记成了真人访问。
+     * 「认不出来」这件事本身就是信息：真实浏览器的 UA 一定能给出浏览器或操作系统特征，
+     * 两样都给不出的，绝大多数是脚本。宁可把小众浏览器误记成机器人，
+     * 也好过让扫描器混在人类流量里把统计数字撑起来 —— 前者看一眼 UA 就能发现，
+     * 后者会安静地让每一个数字都偏高。
+     *
+     * @return bool
+     */
     public function isRobot(): bool
     {
         if ($this->robotID === null) {
-            if (!empty($this->ua)) {
-                if (preg_match('#([a-zA-Z0-9]+\s*(?:-?bot|spider|-?client|-?User))[ /v]*([0-9.]*)#i', $this->ua, $matches)) {
-                    $this->robotID = $this->robotName = $matches[1];
-                    $this->robotVersion = $matches[2];
-                }
-                foreach (self::$robots as $val) {
-                    if (str_contains($this->ual, self::filter($val))) {
-                        $this->robotID = $this->robotName = $val;
-                    }
-                }
-            }
-            if ($this->robotID === null) $this->robotID = '';
-            if ($this->robotName === null) $this->robotName = '';
-            if ($this->robotVersion === null) $this->robotVersion = '';
+            $this->detectRobot();
         }
         return $this->robotID !== '';
+    }
+
+    /**
+     * 跑一遍判定，把结果写进 robotID / robotName / robotVersion
+     *
+     * @return void
+     */
+    private function detectRobot(): void
+    {
+        $this->robotID = $this->robotName = $this->robotVersion = '';
+
+        $ua = trim($this->ua);
+
+        # 5. 空 UA 或占位符（"-"、"."、"unknown" 这类），真实浏览器不会这样
+        if ($ua === '' || preg_match('/^[\s\-._~+*?]*$/', $ua) || strcasecmp($ua, 'unknown') === 0) {
+            $this->robotID = $this->robotName = self::NO_UA;
+            return;
+        }
+
+        # 1. 已知工具：最确定，也最该排在名单前面（名单里有短词，容易被长文本误命中）
+        foreach (self::$tools as $needle => $label) {
+            if (preg_match(self::wordPattern($needle), $ua)) {
+                $this->robotID = $this->robotName = $label;
+                # 工具名后面常跟 /版本
+                if (preg_match('#' . preg_quote($needle, '#') . '[/ v]*([0-9][0-9._]*)#i', $ua, $v)) {
+                    $this->robotVersion = rtrim($v[1], '.');
+                }
+                return;
+            }
+        }
+
+        /*
+         * 2. 收录的爬虫名单。
+         *
+         * 排在下面那条通用正则**前面**：正则抓的是「紧挨着 bot/spider 的那一个词」，
+         * 名字常常只截到一半 —— Sogou web spider/4.0 会被记成 "web spider"。
+         * 名单给的是完整名字，能匹配上就优先用它。
+         * （名单现在按词边界匹配，不再有 Custo 命中 customers 那类问题，可以放心提前。）
+         */
+        foreach (self::$robots as $val) {
+            if (preg_match(self::wordPattern($val), $ua)) {
+                $this->robotID = $this->robotName = $val;
+                if (preg_match('#' . preg_quote($val, '#') . '[/ v]*([0-9][0-9._]*)#i', $ua, $v)) {
+                    $this->robotVersion = rtrim($v[1], '.');
+                }
+                return;
+            }
+        }
+
+        # 3. 名字里带 bot / spider / client / User 的，名单没收录时兜一下
+        if (preg_match('#([a-zA-Z0-9]+\s*(?:-?bot|spider|-?client|-?User))[ /v]*([0-9.]*)#i', $ua, $matches)) {
+            $this->robotID = $this->robotName = $matches[1];
+            $this->robotVersion = $matches[2];
+            return;
+        }
+
+        /*
+         * 4. UA 里带 URL 或邮箱。
+         *
+         * 「把联系方式写进 UA」是爬虫二十多年的惯例（+http://… 这种写法），
+         * 目的就是让站长知道是谁在抓、去哪儿投诉。真实浏览器没有这个需要。
+         * 名字取 URL 的主机名 / 邮箱的域名 —— 它正好标识了运营方，
+         * 比记一个「未知」有用得多，同一家扫描器的记录也能聚到一起。
+         */
+        if (preg_match('#https?://([^\s/;,)\]<>"\']+)#i', $ua, $m)) {
+            $this->robotID = $this->robotName = self::hostLabel($m[1]);
+            return;
+        }
+        if (preg_match('/[\w.+-]+@([\w-]+(?:\.[\w-]+)+)/', $ua, $m)) {
+            $this->robotID = $this->robotName = self::hostLabel($m[1]);
+            return;
+        }
+
+        /*
+         * 6. 兜底：浏览器和操作系统都认不出来。
+         *
+         * 放在最后，因为它最容易误伤 —— 覆盖率完全取决于 parseBrowser() / parseOS()
+         * 认得全不全。新增小众浏览器的识别规则，会自动减少这一类的误判。
+         */
+        if (!$this->parseBrowser() && !$this->parseOS()) {
+            $this->robotID = $this->robotName = self::UNIDENTIFIED;
+        }
+    }
+
+    /**
+     * 把一个名字编成「带词边界」的正则
+     *
+     * 原来是 str_contains(去空格小写的 UA, 去空格小写的名字)，没有边界，实测误判：
+     *   - 名单里的 Custo 命中了长文本 UA 里的 customers
+     *   - Ask 会命中任何含 ask 的串（task、Basketball…）
+     * 前后各加一个「不能紧挨字母数字」的断言就没有这个问题；
+     * 名字里的空格放宽成 \s*，这样 "Sogou web spider" 不同写法都能对上。
+     *
+     * @param string $needle
+     * @return string
+     */
+    private static function wordPattern(string $needle): string
+    {
+        $parts = preg_split('/\s+/', trim($needle));
+        $body = implode('\s*', array_map(static fn(string $p): string => preg_quote($p, '/'), $parts));
+        return '/(?<![a-z0-9])' . $body . '(?![a-z0-9])/i';
+    }
+
+    /**
+     * 主机名 / 域名收拾成适合当标识的样子
+     *
+     * @param string $host
+     * @return string
+     */
+    private static function hostLabel(string $host): string
+    {
+        $host = strtolower(rtrim($host, '.'));
+        $host = preg_replace('/^www\./', '', $host);
+        # robot_id 列是 varchar(32)，太长的从右边留（右边是更有辨识度的主域名）
+        return strlen($host) > 32 ? substr($host, -32) : $host;
     }
 
     public function getRobotID(): string
