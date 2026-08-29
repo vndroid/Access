@@ -1,5 +1,19 @@
 v3.2.6
 2026年08月29日
+    - **来源 URL 的规范化补齐 RFC 3986 §6.2.3 的另外两项**：path 为空时补成 "/"、
+      去掉默认端口（http 的 :80、https 的 :443）。此前只做了 scheme 与主机名小写，
+      于是同一个站点在「来源 URL」Top N 里被拆成两条 —— 实测
+      https://wave.com/ 9431 次、https://wave.com 3567 次。规范里这两个就是同一个 URI：
+      「a URI that uses the generic syntax for authority with an empty path
+      should be normalized to a path of "/"」。域名那一栏本来就是合并的，只有 URL 栏会分开。
+      **只补空 path，绝不动别处的尾部斜杠**：https://wave.com/foo 和 https://wave.com/foo/
+      是不同的 URL，服务器普遍当成不同资源（最常见的表现就是其中一个 301 跳到另一个，
+      而「需要跳转」本身就证明它们不是同一个地址）。统一去掉或统一加上尾斜杠，
+      会把真实存在的不同来源页面糊成一条
+    - normalize-domains.php 的候选行预筛跟着一起改。它原来只查大小写，
+      而 https://wave.com（path 为空）本来就是全小写的 —— 直接重跑回填会被预筛整个跳过，
+      工具报「改动 0 行」而问题原封不动。这和 MySQL 排序规则那个坑是同一种形状：
+      预筛与实际规则脱节，跑完一行没动还看不出问题。以后再加规范化规则，记得回来加判据
     - **修复迁移接口在「扫完但仍有失败行」时无法重试**。原来只在 pending > 0 时调 run()，
       而断点扫到头之后 pending 就是 0、失败行是单独记账的 —— 每轮 run() 开头的 retryFailures()
       正是补写这些行的唯一入口，于是接口一直回 blocked，哪怕数据库那边的障碍早就排除了。

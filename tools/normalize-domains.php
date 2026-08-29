@@ -7,7 +7,10 @@
  * 判定规则改好之后只对新数据生效，存量行要靠这个脚本重算。
  *
  * 处理四列：referer_domain、entrypoint_domain（整列小写）、
- *           referer、entrypoint（只把 scheme 和主机名小写，path / query 原样保留）。
+ *           referer、entrypoint（走 Queue::normalizeUrl()，与写入侧同一套规则）。
+ * URL 的规范化只做 RFC 3986 §6.2.3 允许的那几项：scheme 与主机名小写、
+ * 去掉默认端口（http 的 :80 / https 的 :443）、path 为空时补成 "/"。
+ * path 与 query 的内容原样保留 —— 它们区分大小写，而 /foo 和 /foo/ 是不同的地址。
  * 其余列一概不动。
  *
  * 用法（在网站根目录执行）：
@@ -21,7 +24,7 @@
  *   --limit=200000            最多处理这么多行后停下（分多次跑）
  *   --dry-run                 只统计会改多少行，不写库
  *   --yes                     跳过确认
- *   --scan-all                不做候选行预筛，逐行读出来比对（预筛出问题时的退路）
+ *   --scan-all                不做候选行预筛，逐行读出来比对（预筛出问题、或新增规范化规则时的退路）
  *
  * 退出码：0 完成；1 环境或连接问题；2 被中断（用 --from 继续）
  */
@@ -94,14 +97,33 @@ if (!Database::tableExists($db, $plain)) {
  */
 function candidateCondition(Driver $driver): string
 {
-    $columns = array_merge(HOST_COLUMNS, URL_COLUMNS);
     $parts = [];
-    foreach ($columns as $c) {
+
+    foreach (array_merge(HOST_COLUMNS, URL_COLUMNS) as $c) {
         $parts[] = match ($driver) {
             Driver::Mysql => "CAST({$c} AS BINARY) <> CAST(LOWER({$c}) AS BINARY)",
             default       => "{$c} <> LOWER({$c})",
         };
     }
+
+    /*
+     * 光查大小写是不够的 —— 预筛必须跟着规范化规则一起长。
+     *
+     * https://wave.com（path 为空，要补成 /）本来就是全小写的，只查大小写的话
+     * 这些行会被预筛整个跳过，工具报「改动 0 行」而问题原封不动。
+     * 这和 MySQL 排序规则那个坑是同一种形状：预筛和实际规则脱节，
+     * 跑完一行没动还看不出问题。以后再加规范化规则，记得回来加判据。
+     *
+     * 判据宁可宽 —— 多读几行只是慢一点，最终改成什么由 PHP 侧算，不会改错。
+     */
+    foreach (URL_COLUMNS as $c) {
+        # path 为空：形如 scheme://主机，:// 之后再没有 /
+        $parts[] = "({$c} LIKE '%://%' AND {$c} NOT LIKE '%://%/%')";
+        # 默认端口：:80 / :443（这两条会误收含这些字样的 path，无所谓）
+        $parts[] = "({$c} LIKE '%:80/%' OR {$c} LIKE '%:443/%'"
+                 . " OR {$c} LIKE '%:80' OR {$c} LIKE '%:443')";
+    }
+
     return '(' . implode(' OR ', $parts) . ')';
 }
 
@@ -122,7 +144,7 @@ try {
 out("表 {$plain}（{$driver->value}）：" . number_format($total) . ' 行，最大 id ' . number_format($maxId));
 out('起点 id > ' . number_format($from) . '，每批 ' . number_format($batch) . ' 行'
     . ($limit > 0 ? '，本次最多处理 ' . number_format($limit) . ' 行' : ''));
-out($scanAll ? '预筛：关闭（逐行比对）' : '预筛：只读出四列中含大写的行');
+out($scanAll ? '预筛：关闭（逐行比对）' : '预筛：只读出「可能需要规范化」的行（含大写 / path 为空 / 默认端口）');
 out($dryRun ? '模式：--dry-run（只统计，不写库）' : '模式：实际写入');
 
 if ($driver === Driver::Mysql) {

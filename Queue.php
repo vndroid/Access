@@ -1234,12 +1234,52 @@ LUA;
             return '';
         }
 
-        return (string)preg_replace_callback(
-            '~^([a-zA-Z][a-zA-Z0-9+.\-]*://)([^/?#@]*@)?(\[[^\]]*\]|[^/?#:]*)~',
-            static fn(array $m): string => strtolower($m[1]) . ($m[2] ?? '') . strtolower($m[3] ?? ''),
-            $url,
-            1
-        );
+        /*
+         * 一次匹配出 scheme / 用户信息 / 主机名 / 端口，剩下的（path?query#frag）原样留着。
+         * 主机名要认两种形态：普通域名，以及 IPv6 字面量的 [....]；
+         * 只写 [^/?#:]* 的话，[FE80::ABCD] 会在第一个冒号处停下，只有 "[FE80" 被小写。
+         */
+        $pattern = '~^([a-zA-Z][a-zA-Z0-9+.\-]*://)([^/?#@]*@)?(\[[^\]]*\]|[^/?#:]*)(:[0-9]*)?~';
+
+        if (preg_match($pattern, $url, $m) !== 1) {
+            # 不是「scheme://主机」这种形态（相对地址、mailto: 之类），不动它
+            return $url;
+        }
+
+        $scheme   = strtolower($m[1]);
+        $userinfo = $m[2] ?? '';                 // user:pass@ 原样保留，密码区分大小写
+        $host     = strtolower($m[3] ?? '');
+        $port     = $m[4] ?? '';
+        $rest     = substr($url, strlen($m[0])); // path + query + fragment
+
+        /*
+         * 默认端口去掉（RFC 3986 §6.2.3）：https://wave.com:443/x 和 https://wave.com/x
+         * 是同一个 URI，留着就会在来源 Top N 里各占一行。空的 ":" 同理。
+         */
+        if ($port === ':'
+            || ($scheme === 'http://' && $port === ':80')
+            || ($scheme === 'https://' && $port === ':443')) {
+            $port = '';
+        }
+
+        /*
+         * path 为空时补成 "/"（RFC 3986 §6.2.3）：
+         *   「a URI that uses the generic syntax for authority with an empty path
+         *     should be normalized to a path of "/"」
+         * 所以 https://wave.com 和 https://wave.com/ 在规范层面就是同一个地址，
+         * 不补的话来源 Top N 会把同一个站点拆成两条（实测 9431 : 3567）。
+         *
+         * **只补空 path，绝不动别处的尾部斜杠。**
+         * https://wave.com/foo 和 https://wave.com/foo/ 是不同的 URL —— 服务器普遍
+         * 把它们当成不同资源，最常见的表现就是其中一个 301 跳到另一个，
+         * 而「需要跳转」本身就证明了它们不是同一个地址。统一去掉或统一加上尾斜杠，
+         * 会把真实存在的不同来源页面糊成一条。
+         */
+        if ($rest === '' || $rest[0] === '?' || $rest[0] === '#') {
+            $rest = '/' . $rest;
+        }
+
+        return $scheme . $userinfo . $host . $port . $rest;
     }
 
     /**
