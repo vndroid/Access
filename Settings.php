@@ -54,7 +54,6 @@ final class Settings
         'dbPass' => '',
         'dbName' => '',
         'dbPrefix' => 'typecho_',
-        'dbCharset' => '',
     ];
 
     /** 顶层的 YAML 键名 */

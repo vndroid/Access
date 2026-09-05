@@ -51,7 +51,6 @@ access:
   dbPass: ""
   dbName: ""                      # 选独立数据库时必填，需预先建好
   dbPrefix: "typecho_"            # 最终表名为 [前缀]access
-  dbCharset: ""                   # 留空按类型取默认字符集（MySQL utf8mb4，PostgreSQL utf8）
 ```
 
 ## 全部配置项
@@ -80,7 +79,9 @@ access:
 | `dbPass` | 空 | 独立数据库密码 |
 | `dbName` | 空 | 独立数据库库名，选独立数据库时必填 |
 | `dbPrefix` | `typecho_` | 独立数据库中的表前缀，最终表名为 `[前缀]access` |
-| `dbCharset` | 空 | 留空按类型取默认字符集 |
+
+> 字符集不可配置，按类型固定：MySQL / MariaDB 用 `utf8mb4`，PostgreSQL 用 `utf8`。
+> 旧文件里遗留的 `dbCharset` 会被忽略，不影响加载。
 
 ## 格式说明
 

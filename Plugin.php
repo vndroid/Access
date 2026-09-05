@@ -28,7 +28,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.2.6
+ * @version 3.2.7
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
@@ -442,10 +442,13 @@ class Plugin implements PluginInterface
             'dbPrefix', null, 'typecho_',
             '统计数据表前缀', '独立数据库中数据表的前缀，最终表名为 [前缀]access'
         );
-        $dbCharset = new Text(
-            'dbCharset', null, '',
-            '统计数据库字符集', '留空则按类型使用默认值（MySQL utf8mb4，PostgreSQL utf8）'
-        );
+        /*
+         * 字符集不再作为设置项暴露。它只有一个正确答案：MySQL 用 utf8mb4、
+         * PostgreSQL 用 utf8（见 DbType::defaultCharset()）。留成输入框的唯一效果
+         * 是给人填错的机会 —— 填 utf8（在 MySQL 里是 utf8mb3）会让四字节字符
+         * （emoji、部分 CJK 扩展）在写入 UA、来源 URL 时被截断或报错，
+         * 而这类错误在写入路径上是被吞掉的，表现为统计悄悄少了一部分。
+         */
         $form->addInput($pageSize);
         $form->addInput($isDrop);
         $form->addInput($writeType);
@@ -468,7 +471,6 @@ class Plugin implements PluginInterface
         $form->addInput($dbPass);
         $form->addInput($dbName);
         $form->addInput($dbPrefix);
-        $form->addInput($dbCharset);
     }
 
     /**
@@ -954,7 +956,7 @@ class Plugin implements PluginInterface
                     __TYPECHO_ROOT_DIR__ . __TYPECHO_PLUGIN_DIR__ . '/Access/sql/' . $driver->schemaFile()
                 );
                 $scripts = str_replace('typecho_', $prefix, $scripts);
-                $scripts = str_replace('%charset%', 'utf8mb4', $scripts);
+                $scripts = str_replace('%charset%', $driver->defaultCharset(), $scripts);
                 foreach (explode(';', $scripts) as $script) {
                     $script = trim($script);
                     if ($script === '' || strtoupper($script) === 'COMMIT') {

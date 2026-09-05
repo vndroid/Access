@@ -1,3 +1,19 @@
+v3.2.7
+2026年09月05日
+    - **移除插件设置里的「统计数据库字符集」输入框**，改为按数据库类型固定：
+      MySQL / MariaDB 用 utf8mb4，PostgreSQL 用 utf8（DbType::defaultCharset()）。
+      这一项只有一个正确答案，暴露成输入框的唯一效果是给人填错的机会：
+      在 MySQL 上填 utf8 实际是 utf8mb3，四字节字符（emoji、部分 CJK 扩展）
+      写 UA 与来源 URL 时会被截断或直接报错，而写入路径上的异常是被吞掉的
+      （Plugin::backend 整个 try/catch），表现就是统计悄悄少了一部分而没有任何提示
+    - config/current.yaml 里遗留的 dbCharset 会被忽略（Settings::load 只认 DEFAULTS 里的键），
+      不会因此报「无法解析」而整份拒绝；下次禁用插件写回文件时该项自动消失
+    - options 表里遗留的 dbCharset 不再被读取（Database::settings 直接取类型默认值），
+      下次保存设置后随表单一起消失。此前刻意填过非默认字符集的站点会被改回默认值 ——
+      这正是本次改动的目的
+    - 建表脚本里的 %charset% 占位符改为取 $driver->defaultCharset() 而不是写死 utf8mb4，
+      与上面同一个来源，避免以后加数据库类型时两处失配
+
 v3.2.6
 2026年08月29日
     - **来源 URL 的规范化补齐 RFC 3986 §6.2.3 的另外两项**：path 为空时补成 "/"、

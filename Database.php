@@ -76,7 +76,8 @@ final class Database
             'password' => $pick('dbPass', ''),
             'database' => $pick('dbName', ''),
             'prefix'   => $pick('dbPrefix', 'typecho_'),
-            'charset'  => $pick('dbCharset', $type->defaultCharset()),
+            # 字符集不可配置：每种数据库只有一个正确取值，见 DbType::defaultCharset()
+            'charset'  => $type->defaultCharset(),
         ];
     }
 
