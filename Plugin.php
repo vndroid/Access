@@ -140,7 +140,7 @@ class Plugin implements PluginInterface
      * @return string
      * @throws DbException
      * @throws PluginException
- */
+     */
     public static function deactivate(): string
     {
         $cleanFlag = false;
@@ -335,25 +335,25 @@ class Plugin implements PluginInterface
         );
         $isDrop = new Radio(
             'isDrop', [
-                '0' => '否',
-                '1' => '是',
-            ], '0', '数据清理', '在禁用插件时，同时删除数据库中历史数据（无法恢复）谨慎修改。'
+            '0' => '否',
+            '1' => '是',
+        ], '0', '数据清理', '禁用插件时，同时删除数据库中历史数据<strong>谨慎修改</strong>，无法恢复'
         );
         $writeType = new Radio(
             'writeType', [
-                '0' => '前端',
-                '1' => '后端',
-            ], '1', '统计类型', '日志写入类型（若选择为前端方式，如果使用了 PJAX，请在 PJAX 相关事件中调用 <code>window.Access.track()</code> 方法），理论上前端吞吐量大于后端'
+            '0' => '前端',
+            '1' => '后端',
+        ], '1', '统计类型', '日志写入类型（若处于前端方式，如使用了 PJAX，请在 PJAX 相关事件中调用 <code>window.Access.track()</code> 方法），理论上前端吞吐量大于后端'
         );
         $isPaid = new Radio(
             'isPaid', [
-                '0' => 'Lite',
-                '1' => 'Core',
-            ], '0', 'IPinfo 接口类型', '默认使用 Lite（免费版），支持的字段相比 Core（付费版）少，<a href="https://ipinfo.io/developers" target="_blank">官方文档</a> '
+            '0' => 'Lite',
+            '1' => 'Core',
+        ], '0', 'IPinfo 接口类型', '默认使用 Lite（免费版），支持的字段相比 Core（付费版）少，具体参考：<a href="https://ipinfo.io/developers" target="_blank">官方文档</a> '
         );
         $isToken = new Text(
             'isToken', null, '',
-            'IPinfo 接口令牌', '接口调用令牌，请前往 <a href="https://ipinfo.io/dashboard" target="_blank">IPinfo</a> 面板获取'
+            'IPinfo 接口认证', '接口调用令牌，请前往 <a href="https://ipinfo.io/dashboard" target="_blank">IPinfo</a> 面板获取'
         );
         $socks5Host = new Text(
             'socks5Host', null, '',
@@ -365,10 +365,10 @@ class Plugin implements PluginInterface
         );
         $redisCache = new Radio(
             'redisCache', [
-                '0' => '禁用',
-                '1' => '启用',
-            ], '0', '缓存加速',
-            '启用后来源统计等慢查询结果会缓存至 Redis，提高访问速度'
+            '0' => '禁用',
+            '1' => '启用',
+        ], '0', '缓存加速',
+            '启用时来源统计等慢查询结果会缓存至 Redis，提高访问速度'
         );
         $redisHost = new Text(
             'redisHost', null, '127.0.0.1',
@@ -384,18 +384,18 @@ class Plugin implements PluginInterface
         );
         $writeQueue = new Radio(
             'writeQueue', [
-                '1' => '自动',
-                '0' => '禁用',
-            ], '1', '写入缓冲',
+            '1' => '自动',
+            '0' => '禁用',
+        ], '1', '写入缓冲',
             '在启用了「缓存加速」时，访问日志先写入 Redis 队列，'
             . '可以显著降低突发流量下的数据库连接数与写入压力，'
             . '未配置 Redis 时本项自动禁用，写入行为与之前一致。'
         );
         $queueSwitch = new Radio(
             'queueSwitch', [
-                'safe'  => '安全',
-                'force' => '强制切换一次',
-            ], 'safe', '队列归属变更',
+            'safe' => '安全',
+            'force' => '强制切换一次',
+        ], 'safe', '队列归属变更',
             '改动 Redis 地址、写入缓冲开关或统计数据库，都会让已经攒在旧队列里的消息失去归属。'
             . '「安全」会先用旧配置把队列刷干净，刷不干净就拒绝保存，'
             . '避免旧数据写错库或永远留在旧 Redis 里。'
