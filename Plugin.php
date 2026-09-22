@@ -956,7 +956,7 @@ class Plugin implements PluginInterface
                     __TYPECHO_ROOT_DIR__ . __TYPECHO_PLUGIN_DIR__ . '/Access/sql/' . $driver->schemaFile()
                 );
                 $scripts = str_replace('typecho_', $prefix, $scripts);
-                $scripts = str_replace('%charset%', $driver->defaultCharset(), $scripts);
+                $scripts = str_replace('%charset%', 'utf8mb4', $scripts);
                 foreach (explode(';', $scripts) as $script) {
                     $script = trim($script);
                     if ($script === '' || strtoupper($script) === 'COMMIT') {
