@@ -1103,10 +1103,30 @@ final class Migrate
     }
 
     /**
+     * 跟随主库时的固定指纹取值
+     *
+     * 就是历史上「什么都没填」时 Database::settings() 给出的那组默认值，
+     * 这样没动过这几项的存量站点算出来的指纹和以前一模一样（Schema 版本记录、
+     * 迁移标记都挂在这个指纹上，变了就会被当成一个没见过的库重新升级一遍）。
+     */
+    private const FOLLOW_FINGERPRINT = ['follow', '127.0.0.1', '0', '', 'typecho_'];
+
+    /**
      * 目标库指纹，目标库换了地方就需要重新迁移
+     *
+     * 只把**真正决定数据落在哪**的项算进来。跟随主库时（包括选了独立库类型
+     * 但库名留空、Database::isExternal() 为假的情况），地址/端口/库名/前缀一概不生效，
+     * 以前却照样算进指纹：随手改一下这些不生效的框，保存时就会被当成换了统计库 ——
+     * 提示「数据表结构已由 3.1.x 升级」（假的）、触发队列排空闸门（Redis 不可用时直接拒绝保存）、
+     * access_schema_version 里再多一个永远用不上的指纹。
      */
     public static function fingerprint(array $dbSettings): string
     {
+        $type = $dbSettings['type'] ?? DbType::Follow;
+        if (!$type->isExternal() || (string)($dbSettings['database'] ?? '') === '') {
+            return md5(implode('|', self::FOLLOW_FINGERPRINT));
+        }
+
         return md5(implode('|', [
             ($dbSettings['type'] ?? DbType::Follow)->value,
             $dbSettings['host'] ?? '',

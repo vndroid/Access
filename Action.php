@@ -48,9 +48,77 @@ class Action extends Widget implements ActionInterface
         // 这里只在前端模式下写日志：后端模式下该埋点脚本根本不会被输出，
         // 若仍照写就等于给匿名请求开了一个可以重复灌数据的口子。
         if ($this->getAccess()->config->writeType == 0 && $this->getAccess()->allowTracking()) {
-            $this->getAccess()->writeLogs(null, $this->request->get('u'), $this->request->get('cid'), $this->request->get('mid'));
+            $url = self::trackedUrl($this->request->get('u'));
+            # 没带 u 或者 u 指向别的站：不记。以前没带 u 时 Core 会回落到 REQUEST_URI，
+            # 记下来的是信标自己的地址（/access/track/flag.gif?...），而 u 可以是任意外站 URL
+            if ($url !== null) {
+                $this->getAccess()->writeLogs(
+                    null,
+                    $url,
+                    self::trackedId($this->request->get('cid')),
+                    self::trackedId($this->request->get('mid'))
+                );
+            }
         }
         echo $image;
+    }
+
+    /**
+     * 校验信标带上来的页面地址
+     *
+     * 埋点脚本发的是 location.pathname + search + hash，也就是一个站内的相对路径。
+     * 只接受两种：以单个「/」开头的站内路径；或者主机名与本站一致的绝对地址（折成路径）。
+     * 其余一律拒收 —— 这是个匿名接口，u 里填什么就往统计里写什么。
+     *
+     * @param mixed $u
+     * @return string|null
+     */
+    public static function trackedUrl($u): ?string
+    {
+        if (!is_string($u) || $u === '') {
+            return null;
+        }
+        # 「//evil.example/x」是协议相对的外站地址，不是站内路径
+        if ($u[0] === '/' && !str_starts_with($u, '//') && !str_starts_with($u, '/\\')) {
+            return $u;
+        }
+
+        $parts = parse_url($u);
+        if (!is_array($parts) || !isset($parts['host'], $parts['scheme'])
+            || !in_array(strtolower($parts['scheme']), ['http', 'https'], true)) {
+            return null;
+        }
+        $siteHost = parse_url((string)Options::alloc()->siteUrl, PHP_URL_HOST);
+        if (!is_string($siteHost) || strcasecmp($parts['host'], $siteHost) !== 0) {
+            return null;
+        }
+
+        return ($parts['path'] ?? '/')
+            . (isset($parts['query']) ? '?' . $parts['query'] : '')
+            . (isset($parts['fragment']) ? '#' . $parts['fragment'] : '');
+    }
+
+    /**
+     * 校验信标带上来的 cid / mid
+     *
+     * 两列都是 int unsigned。is_numeric() 放过的「1.5」「1e3」「-5」在这里都不算；
+     * 0 要放行：首页的 mid 就是 0（见 Core::parseArchive()）。
+     *
+     * @param mixed $v
+     * @return int|null
+     */
+    public static function trackedId($v): ?int
+    {
+        if (!is_string($v) && !is_int($v)) {
+            return null;
+        }
+        $v = (string)$v;
+        if ($v === '' || strlen($v) > 10 || !ctype_digit($v)) {
+            return null;
+        }
+        $n = (int)$v;
+
+        return $n <= 4294967295 ? $n : null;
     }
 
     /**
@@ -122,10 +190,11 @@ class Action extends Widget implements ActionInterface
         try {
             $data = @file_get_contents('php://input');
             $data = json_decode($data, true);
-            if (!is_array($data)) {
+            $ids = is_array($data) ? self::deleteIds($data) : null;
+            if ($ids === null) {
                 throw new RuntimeException('params invalid');
             }
-            $this->getAccess()->deleteLogs($data);
+            $this->getAccess()->deleteLogs($ids);
             $response = [
                 'code' => 0,
             ];
@@ -137,6 +206,42 @@ class Action extends Widget implements ActionInterface
         }
 
         $this->response->throwJson($response);
+    }
+
+    /** 单次删除的上限：日志页一页最多几百条，放宽到 1000 足够 */
+    public const DELETE_LIMIT = 1000;
+
+    /**
+     * 校验删除接口的请求体：必须是正整数 id 的列表
+     *
+     * 以前是逐个 intval()：「1 OR 1=1」→ 1，「1.5」→ 1，对象 {"a":1} 也照收，
+     * 请求体写错了会删掉一条谁都没点过的记录，而且返回的是成功。
+     * 现在有一个不合法就整批拒绝；数量也有上限。
+     *
+     * @param array $data
+     * @return int[]|null 不合法时返回 null
+     */
+    public static function deleteIds(array $data): ?array
+    {
+        if (!array_is_list($data) || $data === [] || count($data) > self::DELETE_LIMIT) {
+            return null;
+        }
+        $ids = [];
+        foreach ($data as $v) {
+            if (is_int($v)) {
+                $n = $v;
+            } elseif (is_string($v) && $v !== '' && strlen($v) <= 19 && ctype_digit($v)) {
+                $n = (int)$v;
+            } else {
+                return null;
+            }
+            if ($n <= 0) {
+                return null;
+            }
+            $ids[$n] = $n;
+        }
+
+        return array_values($ids);
     }
 
     /**

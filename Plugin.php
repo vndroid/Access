@@ -28,7 +28,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) {
  *
  * @package Access
  * @author Vex
- * @version 3.2.7
+ * @version 3.2.8
  * @link https://github.com/vndroid/Access
  */
 class Plugin implements PluginInterface
@@ -722,8 +722,13 @@ class Plugin implements PluginInterface
             ];
         }
 
-        $left = $drain['pending'] === null
-            ? _t('若干')
+        /*
+         * 连不上旧 Redis 时根本不知道队列里有没有东西，
+         * 以前照样说「还有 若干 条未落库」，把「不知道」说成了「有」。
+         */
+        $unknown = $drain['pending'] === null;
+        $left = $unknown
+            ? ''
             : number_format((int)$drain['pending'] + (int)$drain['dead']);
 
         /*
@@ -739,23 +744,24 @@ class Plugin implements PluginInterface
 
         $why = empty($drain['error']) ? '' : _t('（%s）', $drain['error']);
 
+        $state = $unknown
+            ? _t('无法确认旧队列是否还有未落库的消息%s。如果有，', $why)
+            : _t('旧队列中还有 %s 条未落库%s。', $left, $why);
+
         if (($settings['queueSwitch'] ?? 'safe') === 'force') {
             return [
                 'blocked' => false,
-                'note' => _t('注意：已按「强制切换一次」保存，旧队列中还有 %s 条未落库。%s', $left, $consequence),
+                'note' => _t('注意：已按「强制切换一次」保存。') . $state . $consequence,
             ];
         }
 
         return [
             'blocked' => true,
-            'note' => _t(
-                '配置未保存：旧队列中还有 %s 条未落库。%s%s '
-                . '请先执行 tools/flush-queue.php 把队列刷干净后重试；'
-                . '确实要丢下这些消息时，把「队列归属变更」改为「强制切换一次」再保存。',
-                $left,
-                $consequence,
-                $why
-            ),
+            'note' => _t('配置未保存：') . $state . $consequence . ' '
+                . _t(
+                    '请先执行 tools/flush-queue.php 把队列刷干净后重试；'
+                    . '确实要丢下这些消息时，把「队列归属变更」改为「强制切换一次」再保存。'
+                ),
         ];
     }
 
@@ -764,6 +770,13 @@ class Plugin implements PluginInterface
      *
      * queueHome() 用来判断「要不要刷」，这个用来判断「刷不干净会怎样」——
      * Redis 没变的话旧消息还够得着，只是会写错库；变了就是彻底够不着。
+     *
+     * **密码不算在内。** 密码是「怎么进门」，不是「去哪个门」：同一个 host:port 上
+     * 换密码，老队列还在原地，新配置照样消费得到。以前把密码算进来，
+     * 改密码就被当成「换了 Redis」，于是要先用**旧密码**去排空 ——
+     * 旧密码恰恰是填错了才要改的那个，连不上，保存被拒，提示还说旧队列里有
+     * 「若干」条未落库（其实一条都没有）。服务端改了 requirepass 也是同一堵墙，
+     * 唯一出路是「强制切换一次」。
      *
      * @param array|\Typecho\Config|null $config
      * @return string
@@ -774,7 +787,7 @@ class Plugin implements PluginInterface
 
         return $target === null
             ? 'redis-off'
-            : $target['host'] . ':' . $target['port'] . ':' . $target['auth'];
+            : strtolower($target['host']) . ':' . $target['port'];
     }
 
     /**

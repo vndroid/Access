@@ -31,10 +31,8 @@ class Ip
             ];
         }
 
-        $nip = gethostbyname($ip);
-        $ipdot = explode('.', $nip);
-
-        if ($ipdot[0] < 0 || $ipdot[0] > 255 || count($ipdot) !== 4) {
+        $nip = self::canonical($ip);
+        if ($nip === null) {
             return [
                 'status'  => 'failure',
                 'error'   => 'IP地址不合法',
@@ -65,6 +63,40 @@ class Ip
     }
 
     /**
+     * 把传进来的地址规整成可以直接拿去查询的形式；不是 IP 就返回 null
+     *
+     * 以前是 gethostbyname() 之后按「.」拆成四段来判合法：
+     * - 所有 IPv6 地址（控制台里已经能正确显示）一律被判成「IP地址不合法」；
+     * - 传主机名进来会被拿去做一次 DNS 解析，再用解析结果去查地理位置 ——
+     *   这个接口只该查 IP，不该替调用方解析任意域名。
+     *
+     * IPv4 映射的 IPv6（::ffff:1.2.3.4）按其中的 IPv4 查，两个上游对它的支持都不稳定。
+     */
+    private static function canonical(string $ip): ?string
+    {
+        $ip = trim($ip);
+        # 允许带方括号的写法（[2001:db8::1]），控制台复制出来的地址可能是这种
+        if (str_starts_with($ip, '[') && str_ends_with($ip, ']')) {
+            $ip = substr($ip, 1, -1);
+        }
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return $ip;
+        }
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            return null;
+        }
+        $packed = inet_pton($ip);
+        if ($packed === false) {
+            return null;
+        }
+        if (strlen($packed) === 16 && str_starts_with($packed, str_repeat("\0", 10) . "\xff\xff")) {
+            return (string)inet_ntop(substr($packed, 12));
+        }
+        # 统一成压缩的小写形式，缓存命中和上游请求都用同一个写法
+        return (string)inet_ntop($packed);
+    }
+
+    /**
      * 通过 IPinfo 接口查询地址详情
      * 接口分为 Lite 和 Core 两种，分别为免费、付费接口
      *
@@ -79,7 +111,7 @@ class Ip
         } else {
             $officialUrl = 'https://api.ipinfo.io/lite/';
         }
-        $url = $officialUrl . $ip . '?token=' . $token;
+        $url = $officialUrl . rawurlencode($ip) . '?token=' . rawurlencode($token);
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_URL, $url);
@@ -170,7 +202,7 @@ class Ip
         }
 
         $config = Options::alloc()->plugin(basename(__DIR__));
-        $url = 'https://tools.keycdn.com/geo.json?host=' . $ip;
+        $url = 'https://tools.keycdn.com/geo.json?host=' . rawurlencode($ip);
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_URL, $url);

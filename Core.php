@@ -1316,9 +1316,8 @@ LUA;
             }
         }
 
-        foreach ($ids as $id) {
-            $this->db->query($this->db->delete('table.access')->where('id = ?', $id));
-        }
+        # 一条 DELETE 删完；以前逐条发，勾满一页就是几百个往返
+        $this->db->query($this->db->delete('table.access')->where('id IN (' . implode(',', $ids) . ')'));
 
         if ($this->redis !== null) {
             Cache::invalidate($this->redis, $dates);
@@ -1484,14 +1483,18 @@ LUA;
             $url = $this->request->getServer('REQUEST_URI');
         }
         $ip = $this->request->getIp();
-        if ($ip == null) {
-            $ip = '0.0.0.0';
-        }
         // 判断 IP 类型
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
             $ip = bindec(decbin(ip2long($ip)));
         } else if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
             $ip = $this->ip62long($ip);
+        } else {
+            /*
+             * Typecho 取不到合法 IP 时返回字面量「unknown」（Request::getIp()），
+             * 以前原样写进 ip 列 —— 这一列存的是十进制整数，控制台换算不回去，
+             * 就直接把「unknown」显示出来。按列默认值 0 记。
+             */
+            $ip = '0';
         }
 
         $entrypoint = $this->getEntryPoint();

@@ -506,12 +506,24 @@ class UA
             } elseif (preg_match('#(Edg|Edge|EdgA|EdgiOS)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 $this->browserID = $this->browserName = 'Edge';
                 $this->browserVersion = $matches[2];
-            } elseif (preg_match('#Chrome/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+            } elseif (preg_match('#(?:Chrome|CriOS)/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+                /*
+                 * CriOS 是 iOS 上的 Chrome。iOS 上所有浏览器都是 WebKit 内核，
+                 * UA 结尾同样带「Safari/604.1」，不先认 CriOS 就会落进下面的 Safari 分支。
+                 * （iOS Firefox 的 FxiOS、iOS Edge 的 EdgiOS 在上面已经各自认过了。）
+                 */
                 $this->browserID = $this->browserName = 'Chrome';
                 $this->browserVersion = $matches[1];
             } elseif (preg_match('#Safari/([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
+                /*
+                 * Safari/ 后面是 WebKit 的构建号（605.1.15、604.1），不是 Safari 的版本；
+                 * 真正的版本在 Version/ 里（Version/18.0）。没有 Version/ 的（部分 App 内置 WebView）
+                 * 退回构建号，总比空着强。
+                 */
                 $this->browserID = $this->browserName = 'Safari';
-                $this->browserVersion = $matches[1];
+                $this->browserVersion = preg_match('#Version/([a-zA-Z0-9.]+)#i', $this->ua, $v)
+                    ? $v[1]
+                    : $matches[1];
             } elseif (preg_match('#MSIE ([a-zA-Z0-9.]+)#i', $this->ua, $matches)) {
                 $this->browserID = $this->browserName = 'Internet Explorer';
                 $this->browserVersion = $matches[1];
